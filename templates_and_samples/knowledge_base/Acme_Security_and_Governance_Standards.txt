@@ -1,0 +1,10 @@
+ACME INFORMATION SECURITY & ZERO-TRUST GOVERNANCE STANDARDS
+Standard Ref: SEC-AI-8092 | Compliance: ISO 27001, SOC 2 Type II, EU AI Act
+1. Data Ingestion & Isolation:
+Customer prompt data, uploaded document templates, and enterprise documents shall remain strictly within dedicated tenant VPC boundaries. No data uploaded or generated shall be used to fine-tune or train external foundational models.
+
+2. Role-Based Access Control (RBAC):
+Access to document modification, conversational edits, and vector database embeddings requires cryptographic authentication. Every version modification must log the author, instruction prompt, timestamp, and unified diff summary.
+
+3. Source Traceability & Cryptographic Provenance:
+Every generated section, table, and presentation slide must include explicit citation tags referencing either live web intelligence ([Web-X]) or internal vector knowledge chunks ([RAG-X]). Uncited factual claims must be flagged by the Validation Agent.

@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Agent Document & PPT Generator",
+  "description": "Enterprise-grade multi-agent AI chatbot POC for document and presentation analysis, web research, enterprise RAG, and editable DOCX/PPTX generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

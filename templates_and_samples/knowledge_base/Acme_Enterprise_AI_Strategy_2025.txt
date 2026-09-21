@@ -1,0 +1,15 @@
+ACME ENTERPRISE AI STRATEGY & GOVERNANCE DIRECTIVE (2025-2027)
+Classification: Internal Corporate Policy & Directive
+Section 1: Multi-Agent Deployment Architecture
+Acme Global Solutions mandates the deployment of specialized multi-agent architectures across all document generation and executive presentation workflows. Monolithic single-prompt large language models are prohibited for customer-facing deliverables due to unconstrained hallucination risks and lack of provenance.
+
+Section 2: Vector Database & RAG Specifications
+All generative tasks must be anchored in the Enterprise Knowledge Base via dense vector embeddings. The vector database must support cosine similarity retrieval with a minimum similarity threshold of 0.70. Documents must be indexed using sliding-window chunking (350-character chunks with 60-character overlap) to prevent loss of tabular and numerical context.
+
+Section 3: Native OpenXML Document Integrity
+All generated artifacts must output native Microsoft Word (.docx) and Microsoft PowerPoint (.pptx) binary packages strictly adhering to the ECMA-376 OpenXML standard. External desktop office automation dependencies (e.g. headless Word/PowerPoint processes) are forbidden to ensure containerized microservice portability.
+
+Section 4: Performance SLAs
+- Proposal synthesis latency: Under 30 seconds for 5-page enterprise proposals.
+- Presentation synthesis latency: Under 35 seconds for 12-slide executive slide decks.
+- Brand fidelity: 100% programmatic alignment with Acme design system (Georgia/Arial, Navy #1B365D, Cyan #00A3E0).
