@@ -8,7 +8,7 @@ import sys
 
 from agents.supervisor import SupervisorAgent
 from agents.workspace_agent import run_workspace
-from core.gemini_client import GeminiError
+from core.gemini_client import GeminiError, check_api_key
 from scripts.package_project import package_project
 
 
@@ -20,6 +20,7 @@ def get_status(supervisor: SupervisorAgent) -> dict:
         "versions_count": len(supervisor.version_manager.get_history()),
         "versions": supervisor.version_manager.get_history(),
         "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
+        "gemini_key_status": check_api_key(),
     }
 
 

@@ -43,6 +43,7 @@ export interface SystemStatus {
   versions_count: number;
   versions: VersionRecord[];
   gemini_key_set: boolean;
+  gemini_key_status?: 'ok' | 'missing' | 'invalid' | 'unreachable';
 }
 
 // ----- Content written by Gemini (same shape as agents/content_writer.py) -----

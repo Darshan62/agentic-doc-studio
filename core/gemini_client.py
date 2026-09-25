@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
 DEFAULT_MODEL = "gemini-2.5-flash"
 TIMEOUT_SECONDS = 120
 
@@ -27,6 +28,48 @@ socket.getaddrinfo = _ipv4_getaddrinfo
 
 class GeminiError(Exception):
     pass
+
+
+KEY_HELP = "Create a Gemini API key at https://aistudio.google.com/apikey, set GEMINI_API_KEY in .env and restart the server."
+
+
+def _error_reason(e: urllib.error.HTTPError) -> str:
+    try:
+        return json.loads(e.read() or b"{}").get("error", {}).get("status", "") or ""
+    except (ValueError, OSError, AttributeError):
+        return ""
+
+
+def describe_http_error(e: urllib.error.HTTPError) -> str:
+    """Turns Gemini's HTTP status into a message that says what to do. Keeps the code for debugging."""
+    reason = _error_reason(e)
+    if e.code == 401 or (e.code == 400 and reason in ("INVALID_ARGUMENT", "")):
+        return f"Gemini rejected GEMINI_API_KEY (HTTP {e.code}): it is invalid, expired or not a Gemini API key. {KEY_HELP}"
+    if e.code == 403:
+        return (f"Gemini refused the request (HTTP 403): the key's project can't use the Gemini API "
+                f"(API not enabled or key restricted). {KEY_HELP}")
+    if e.code == 404:
+        return f"Gemini model '{os.environ.get('GEMINI_MODEL', DEFAULT_MODEL)}' was not found (HTTP 404). Check GEMINI_MODEL in .env."
+    if e.code == 429:
+        return "Gemini quota or rate limit reached (HTTP 429). Wait a minute and try again, or use a key with more quota."
+    if e.code >= 500:
+        return f"Gemini is temporarily unavailable (HTTP {e.code}). Please try again shortly."
+    return f"Gemini request failed with HTTP {e.code}{f' ({reason})' if reason else ''}."
+
+
+def check_api_key(timeout: int = 8) -> str:
+    """Cheap key check (lists one model, no tokens used): 'ok' | 'missing' | 'invalid' | 'unreachable'."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key or api_key == "MY_GEMINI_API_KEY":
+        return "missing"
+    request = urllib.request.Request(MODELS_URL, headers={"x-goog-api-key": api_key})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return "ok"
+    except urllib.error.HTTPError as e:
+        return "invalid" if e.code in (400, 401, 403) else "unreachable"
+    except (urllib.error.URLError, TimeoutError, socket.timeout):
+        return "unreachable"
 
 
 def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = False,
@@ -63,7 +106,7 @@ def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = Fals
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.load(response)
     except urllib.error.HTTPError as e:
-        raise GeminiError(f"Gemini request failed with HTTP {e.code}") from e
+        raise GeminiError(describe_http_error(e)) from e
     except urllib.error.URLError as e:
         raise GeminiError(f"Could not reach Gemini: {e.reason}") from e
     except (TimeoutError, socket.timeout) as e:

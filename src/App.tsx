@@ -13,6 +13,12 @@ import { EditorWorkspace } from './components/workspace/EditorWorkspace';
 import { postJson, errorMessage } from './api';
 import { AgentStep, EditResult, OrchestrationResult, SystemStatus } from './types';
 
+const KEY_PROBLEMS: Record<string, string> = {
+  missing: 'GEMINI_API_KEY is not set.',
+  invalid: 'Google rejected GEMINI_API_KEY (invalid, expired, or not a Gemini API key).',
+  unreachable: 'Gemini could not be reached (network problem or Google outage).',
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('workspace');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -103,9 +109,15 @@ export default function App() {
 
       {activeTab !== 'workspace' && (
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {status && !status.gemini_key_set && (
-          <div className="bg-amber-950/60 border border-amber-700 text-amber-200 text-sm rounded-xl p-4">
-            GEMINI_API_KEY is not set. Add it to <code>.env</code> and restart the server.
+        {status && status.gemini_key_status !== 'ok' && (
+          <div role="status" className="bg-amber-950/60 border border-amber-700 text-amber-200 text-sm rounded-xl p-4 space-y-1">
+            <p className="font-semibold">{KEY_PROBLEMS[status.gemini_key_status ?? 'missing']}</p>
+            <p>
+              Generation, web research and image OCR need Gemini. Create a key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com/apikey</a>,
+              set <code>GEMINI_API_KEY</code> in <code>.env</code> and restart <code>npm run dev</code>.
+              The AI Editor Workspace keeps working with its built-in parser.
+            </p>
           </div>
         )}
 

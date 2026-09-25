@@ -2,14 +2,17 @@
 Tests for the edit-command schema, the rule-based parser and the Gemini parser fallback.
 Run:  python -m unittest tests.test_edit_engine
 """
+import io
+import json
 import os
 import unittest
+import urllib.error
 from unittest import mock
 
 from agents.edit_intent_parser import parse_edit_request
 from agents.edit_rule_parser import ParseContext, parse_rules
 from core.edit_schema import EditError, validate_command
-from core.gemini_client import GeminiError
+from core.gemini_client import GeminiError, ask_gemini, check_api_key, describe_http_error
 
 
 def rules(message: str, doc_type: str = "docx", **ctx) -> dict:
@@ -132,7 +135,7 @@ class GeminiParserTests(unittest.TestCase):
         result = parse_edit_request("Change the title color to blue.", self.ctx)
         self.assertEqual(result.parser, "rules")
         self.assertEqual(result.commands[0]["changes"], {"color": "blue"})
-        self.assertIn("built-in parser", result.note)
+        self.assertIn("built-in parser", result.note or "")
 
     @mock.patch("agents.edit_intent_parser.ask_gemini_json", side_effect=GeminiError("HTTP 503"))
     def test_gemini_outage_falls_back_to_rules(self, _ask):
@@ -150,6 +153,34 @@ class GeminiParserTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
             result = parse_edit_request("Change the title color to blue.", self.ctx)
         self.assertEqual(result.parser, "rules")
+
+
+class GeminiErrorMessageTests(unittest.TestCase):
+    def http_error(self, code: int, status: str = ""):
+        body = io.BytesIO(json.dumps({"error": {"status": status}}).encode())
+        return urllib.error.HTTPError("url", code, "error", {}, body)  # type: ignore[arg-type]
+
+    def test_rejected_key_explains_how_to_fix_it(self):
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "bad"}), \
+                mock.patch("urllib.request.urlopen", side_effect=self.http_error(401, "UNAUTHENTICATED")):
+            with self.assertRaisesRegex(GeminiError, r"rejected GEMINI_API_KEY \(HTTP 401\).*aistudio.google.com/apikey"):
+                ask_gemini("q")
+
+    def test_quota_and_outage_messages(self):
+        self.assertIn("quota", describe_http_error(self.http_error(429, "RESOURCE_EXHAUSTED")))
+        self.assertIn("temporarily unavailable", describe_http_error(self.http_error(503)))
+        self.assertIn("not enabled", describe_http_error(self.http_error(403, "PERMISSION_DENIED")))
+
+    def test_key_check(self):
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
+            self.assertEqual(check_api_key(), "missing")
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "bad"}):
+            with mock.patch("urllib.request.urlopen", side_effect=self.http_error(401)):
+                self.assertEqual(check_api_key(), "invalid")
+            with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
+                self.assertEqual(check_api_key(), "unreachable")
+            with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"{}")):
+                self.assertEqual(check_api_key(), "ok")
 
 
 if __name__ == "__main__":
