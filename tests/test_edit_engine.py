@@ -12,7 +12,7 @@ from unittest import mock
 from agents.edit_intent_parser import parse_edit_request
 from agents.edit_rule_parser import ParseContext, parse_rules
 from core.edit_schema import EditError, validate_command
-from core.gemini_client import GeminiError, ask_gemini, check_api_key, describe_http_error
+from core.gemini_client import GeminiError, ask_gemini, ask_gemini_json, check_api_key, describe_http_error, parse_json_answer
 
 
 def rules(message: str, doc_type: str = "docx", **ctx) -> dict:
@@ -185,6 +185,15 @@ class GeminiErrorMessageTests(unittest.TestCase):
         with mock.patch("agents.web_researcher.ask_gemini", side_effect=GeminiError("quota (HTTP 429)")):
             self.assertEqual(agent.research("topic", CitationTracker()), [])
         self.assertIn("429", agent.unavailable_reason)
+
+    def test_json_answer_tolerates_fences_and_retries_once(self):
+        self.assertEqual(parse_json_answer('```json\n{"a": 1}\n```'), {"a": 1})
+        self.assertEqual(parse_json_answer('Here you go: {"a": 1} Done.'), {"a": 1})
+        with mock.patch("core.gemini_client.ask_gemini", side_effect=[('{"a": ', []), ('{"a": 2}', [])]):
+            self.assertEqual(ask_gemini_json("q"), {"a": 2})
+        with mock.patch("core.gemini_client.ask_gemini", return_value=('{"a": ', [])):
+            with self.assertRaisesRegex(GeminiError, "valid JSON"):
+                ask_gemini_json("q")
 
     def test_key_check(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}):

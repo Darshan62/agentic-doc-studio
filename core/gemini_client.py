@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import socket
+import sys
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,7 @@ DEFAULT_MODEL = "gemini-3.5-flash"  # gemini-2.5-flash is retired for new keys (
 # Tried in order when a model is retired (404) or overloaded (503)
 FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.8-flash"]
 RETRY_STATUS = (404, 503)
+JSON_ATTEMPTS = 2
 TIMEOUT_SECONDS = 120
 
 # urllib tries IPv6 addresses first and waits for each one to time out. On networks with
@@ -112,6 +114,8 @@ def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = Fals
     text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
     if not text:
         raise GeminiError("Gemini returned an empty answer.")
+    if candidate.get("finishReason") == "MAX_TOKENS":
+        print(f"[gemini] answer cut off at the output token limit ({len(text)} chars)", file=sys.stderr)
 
     sources = []
     for chunk in candidate.get("groundingMetadata", {}).get("groundingChunks", []):
@@ -132,6 +136,8 @@ def _post_with_fallback(models: List[str], body: Dict[str, Any], api_key: str, t
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.load(response)
+        except json.JSONDecodeError as e:
+            raise GeminiError("Gemini returned an unreadable response. Please try again.") from e
         except urllib.error.HTTPError as e:
             if e.code in RETRY_STATUS and index < len(models) - 1:
                 continue
@@ -139,9 +145,29 @@ def _post_with_fallback(models: List[str], body: Dict[str, Any], api_key: str, t
     raise GeminiError("No Gemini model is configured.")
 
 
-def ask_gemini_json(prompt: str, timeout: int = TIMEOUT_SECONDS, fast: bool = False) -> Dict[str, Any]:
-    text, _ = ask_gemini(prompt, want_json=True, timeout=timeout, fast=fast)
+def parse_json_answer(text: str) -> Dict[str, Any]:
+    """Parses a JSON answer, tolerating ```json fences or a sentence before/after the object."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise GeminiError("Gemini did not return valid JSON.") from e
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(cleaned[start:end + 1])
+
+
+def ask_gemini_json(prompt: str, timeout: int = TIMEOUT_SECONDS, fast: bool = False) -> Dict[str, Any]:
+    # Gemini occasionally returns broken JSON (e.g. an answer cut off mid-object), so ask once more
+    for attempt in range(JSON_ATTEMPTS):
+        text, _ = ask_gemini(prompt, want_json=True, timeout=timeout, fast=fast)
+        try:
+            answer = parse_json_answer(text)
+            if isinstance(answer, dict):
+                return answer
+        except json.JSONDecodeError as e:
+            print(f"[gemini] attempt {attempt + 1}: invalid JSON ({e.msg} at {e.pos}/{len(text)} chars): "
+                  f"...{text[max(0, e.pos - 80):e.pos + 40]!r}", file=sys.stderr)
+    raise GeminiError("Gemini did not return valid JSON twice in a row. Please try again.")
