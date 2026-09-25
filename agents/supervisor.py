@@ -93,8 +93,13 @@ class SupervisorAgent:
 
         web_results = self.web_researcher.research(prompt, citation_tracker)
         sources = [r for r in web_results if r.id]
-        self.log_step(self.web_researcher.name, "Google Search via Gemini",
-                      f"Found {len(sources)} web sources: " + ", ".join(r.title for r in sources))
+        if self.web_researcher.unavailable_reason:
+            self.log_step(self.web_researcher.name, "Google Search skipped",
+                          f"Web search unavailable ({self.web_researcher.unavailable_reason}) "
+                          "Continued with the knowledge base only.")
+        else:
+            self.log_step(self.web_researcher.name, "Google Search via Gemini",
+                          f"Found {len(sources)} web sources: " + ", ".join(r.title for r in sources))
 
         rag_chunks = self.rag_agent.retrieve(prompt, citation_tracker)
         docs_used = sorted({c.source_doc for c in rag_chunks})

@@ -11,7 +11,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"  # gemini-2.5-flash is retired for new keys (HTTP 404)
+# Tried in order when a model is retired (404) or overloaded (503)
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.8-flash"]
+RETRY_STATUS = (404, 503)
 TIMEOUT_SECONDS = 120
 
 # urllib tries IPv6 addresses first and waits for each one to time out. On networks with
@@ -97,16 +100,9 @@ def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = Fals
     if use_web_search:
         body["tools"] = [{"google_search": {}}]
 
-    request = urllib.request.Request(
-        API_URL.format(model=model),
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-    )
+    models = [model] + [m for m in FALLBACK_MODELS if m != model]
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.load(response)
-    except urllib.error.HTTPError as e:
-        raise GeminiError(describe_http_error(e)) from e
+        data = _post_with_fallback(models, body, api_key, timeout)
     except urllib.error.URLError as e:
         raise GeminiError(f"Could not reach Gemini: {e.reason}") from e
     except (TimeoutError, socket.timeout) as e:
@@ -123,6 +119,24 @@ def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = Fals
         if web:
             sources.append({"title": web.get("title", ""), "url": web.get("uri", "")})
     return text, sources
+
+
+def _post_with_fallback(models: List[str], body: Dict[str, Any], api_key: str, timeout: int) -> Dict[str, Any]:
+    """Posts to each model in turn; moves on only when a model is retired (404) or overloaded (503)."""
+    for index, model in enumerate(models):
+        request = urllib.request.Request(
+            API_URL.format(model=model),
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            if e.code in RETRY_STATUS and index < len(models) - 1:
+                continue
+            raise GeminiError(describe_http_error(e)) from e
+    raise GeminiError("No Gemini model is configured.")
 
 
 def ask_gemini_json(prompt: str, timeout: int = TIMEOUT_SECONDS, fast: bool = False) -> Dict[str, Any]:

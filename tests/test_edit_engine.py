@@ -171,6 +171,21 @@ class GeminiErrorMessageTests(unittest.TestCase):
         self.assertIn("temporarily unavailable", describe_http_error(self.http_error(503)))
         self.assertIn("not enabled", describe_http_error(self.http_error(403, "PERMISSION_DENIED")))
 
+    def test_overloaded_model_falls_back_to_next_model(self):
+        ok = io.BytesIO(json.dumps({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]}).encode())
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "k", "GEMINI_MODEL": "gemini-busy"}), \
+                mock.patch("urllib.request.urlopen", side_effect=[self.http_error(503), ok]) as urlopen:
+            self.assertEqual(ask_gemini("q")[0], "hi")
+        self.assertIn("gemini-3.5-flash", urlopen.call_args_list[1].args[0].full_url)
+
+    def test_search_quota_does_not_stop_generation(self):
+        from agents.web_researcher import WebResearchAgent
+        from core.citation_tracker import CitationTracker
+        agent = WebResearchAgent()
+        with mock.patch("agents.web_researcher.ask_gemini", side_effect=GeminiError("quota (HTTP 429)")):
+            self.assertEqual(agent.research("topic", CitationTracker()), [])
+        self.assertIn("429", agent.unavailable_reason)
+
     def test_key_check(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
             self.assertEqual(check_api_key(), "missing")
