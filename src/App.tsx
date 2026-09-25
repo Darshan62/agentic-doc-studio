@@ -52,7 +52,7 @@ export default function App() {
     setTimeout(() => setDownloadingZip(false), 1500);
   };
 
-  const handleRunOrchestration = async (prompt: string, docTpl: string, pptTpl: string) => {
+  const handleRunOrchestration = async (prompt: string, docTpl: string, pptTpl: string, focusDocs: string[]) => {
     setIsProcessing(true);
     setError(null);
     try {
@@ -60,6 +60,7 @@ export default function App() {
         prompt,
         doc_template: docTpl,
         ppt_template: pptTpl,
+        focus_docs: focusDocs,
       });
       setLastResult(data);
       setActiveSteps(data.execution_steps);

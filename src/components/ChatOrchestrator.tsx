@@ -14,10 +14,11 @@ interface UploadedFile {
   name: string;
   message: string;
   isError: boolean;
+  indexed?: boolean;
 }
 
 interface ChatOrchestratorProps {
-  onRunOrchestration: (prompt: string, docTpl: string, pptTpl: string) => Promise<void>;
+  onRunOrchestration: (prompt: string, docTpl: string, pptTpl: string, focusDocs: string[]) => Promise<void>;
   onRunEdit: (instruction: string) => Promise<void>;
   onUploaded: () => void;
   isProcessing: boolean;
@@ -82,7 +83,12 @@ export const ChatOrchestrator: React.FC<ChatOrchestratorProps> = ({
       const result = await postJson<UploadResult>('/api/upload', { filename: file.name, base64Content });
       if (result.filename.endsWith('.docx')) setDocTemplate(result.path);
       if (result.filename.endsWith('.pptx')) setPptTemplate(result.path);
-      addUpload({ name: result.filename, message: describeUpload(result), isError: Boolean(result.ingest?.warning) });
+      addUpload({
+        name: result.filename,
+        message: describeUpload(result),
+        isError: Boolean(result.ingest?.warning),
+        indexed: Boolean(result.ingest?.chunks_indexed),
+      });
       onUploaded();
     } catch (err) {
       addUpload({ name: file.name, message: errorMessage(err), isError: true });
@@ -93,7 +99,9 @@ export const ChatOrchestrator: React.FC<ChatOrchestratorProps> = ({
 
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (prompt.trim() && !isProcessing) onRunOrchestration(prompt, docTemplate, pptTemplate);
+    // Files uploaded here are read first, so "summarise my presentation" uses that file
+    const focusDocs = uploads.filter((u) => !u.isError && u.indexed).map((u) => u.name);
+    if (prompt.trim() && !isProcessing) onRunOrchestration(prompt, docTemplate, pptTemplate, focusDocs);
   };
 
   const handleEdit = () => {
@@ -111,7 +119,7 @@ export const ChatOrchestrator: React.FC<ChatOrchestratorProps> = ({
               <span>Templates & Knowledge Files</span>
             </h2>
             <p className="text-xs text-slate-400">
-              .docx / .pptx become style templates. PDF, DOCX, TXT and images are indexed so the agents can use them.
+              Files you upload here are read first by the agents (e.g. “Summarise my presentation”). A .docx / .pptx also becomes the style template.
             </p>
           </div>
 

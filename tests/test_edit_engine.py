@@ -195,6 +195,35 @@ class GeminiErrorMessageTests(unittest.TestCase):
             with self.assertRaisesRegex(GeminiError, "valid JSON"):
                 ask_gemini_json("q")
 
+    def test_out_of_quota_model_falls_back(self):
+        ok = io.BytesIO(json.dumps({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]}).encode())
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "k", "GEMINI_MODEL": "gemini-3.5-flash"}), \
+                mock.patch("urllib.request.urlopen", side_effect=[self.http_error(429), ok]) as urlopen:
+            self.assertEqual(ask_gemini("q")[0], "hi")
+        self.assertIn("gemini-3.8-flash", urlopen.call_args_list[1].args[0].full_url)
+
+    def test_uploaded_pptx_is_read_and_focused_first(self):
+        import tempfile
+        from agents.ingestion_agent import IngestionAgent
+        from agents.rag_agent import EnterpriseRagAgent
+        from core.citation_tracker import CitationTracker
+        from core.vector_store import EnterpriseVectorStore
+        from templates_and_samples.create_demo_files import acme_logo, build_pptx
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = os.path.join(tmp, "deck.pptx")
+            build_pptx(acme_logo(), deck)
+            store = EnterpriseVectorStore(os.path.join(tmp, "kb.db"))
+            try:
+                store.index_document("other.txt", "other.txt", "Unrelated notes about gardening and tomatoes. " * 20)
+                indexed = IngestionAgent(store).ingest(deck)["chunks_indexed"]
+                chunks = EnterpriseRagAgent(store).retrieve("Summarize my uploaded presentation", CitationTracker(),
+                                                            focus_docs=["deck.pptx"])
+            finally:
+                store.conn.close()
+            # Every chunk of the uploaded deck comes first; leftover slots may hold other sources
+            self.assertEqual([c.source_doc for c in chunks[:indexed]], ["deck.pptx"] * indexed)
+            self.assertIn("Market Opportunity", " ".join(c.content for c in chunks[:indexed]))
+
     def test_key_check(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
             self.assertEqual(check_api_key(), "missing")

@@ -83,7 +83,8 @@ class SupervisorAgent:
         self.ppt_generator.generate(content["deck"], ppt_style, citations, PPTX_OUT)
 
     # ---------- main pipeline ----------
-    def process_request(self, prompt: str, doc_template: str, ppt_template: str) -> Dict[str, Any]:
+    def process_request(self, prompt: str, doc_template: str, ppt_template: str,
+                        focus_docs: Optional[List[str]] = None) -> Dict[str, Any]:
         citation_tracker = CitationTracker()
 
         doc_style, ppt_style = self.load_styles(doc_template, ppt_template)
@@ -101,7 +102,7 @@ class SupervisorAgent:
             self.log_step(self.web_researcher.name, "Google Search via Gemini",
                           f"Found {len(sources)} web sources: " + ", ".join(r.title for r in sources))
 
-        rag_chunks = self.rag_agent.retrieve(prompt, citation_tracker)
+        rag_chunks = self.rag_agent.retrieve(prompt, citation_tracker, focus_docs=focus_docs)
         docs_used = sorted({c.source_doc for c in rag_chunks})
         self.log_step(self.rag_agent.name, "Search knowledge base",
                       f"Retrieved {len(rag_chunks)} chunks from: " + ", ".join(docs_used))

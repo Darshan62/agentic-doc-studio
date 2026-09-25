@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Optional, Tuple
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
 DEFAULT_MODEL = "gemini-3.5-flash"  # gemini-2.5-flash is retired for new keys (HTTP 404)
-# Tried in order when a model is retired (404) or overloaded (503)
-FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.8-flash"]
-RETRY_STATUS = (404, 503)
+# Tried in order when a model is retired (404), out of quota (429, free-tier quotas are per model) or overloaded (503)
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+RETRY_STATUS = (404, 429, 503)
 JSON_ATTEMPTS = 2
 TIMEOUT_SECONDS = 120
 
@@ -126,7 +126,7 @@ def ask_gemini(prompt: str, want_json: bool = False, use_web_search: bool = Fals
 
 
 def _post_with_fallback(models: List[str], body: Dict[str, Any], api_key: str, timeout: int) -> Dict[str, Any]:
-    """Posts to each model in turn; moves on only when a model is retired (404) or overloaded (503)."""
+    """Posts to each model in turn; moves on only when a model is retired, out of quota or overloaded."""
     for index, model in enumerate(models):
         request = urllib.request.Request(
             API_URL.format(model=model),

@@ -15,8 +15,8 @@ const UPLOAD_DIR = path.join(ROOT, "templates_and_samples", "uploads");
 const TEMPLATE_DIR = path.join(ROOT, "templates_and_samples");
 const OUTPUT_DIR = path.join(ROOT, "output");
 const ALLOWED_UPLOADS = [".pdf", ".docx", ".pptx", ".txt", ".md", ".png", ".jpg", ".jpeg"];
-// Files the pipeline can read as knowledge (a .pptx upload is only used as a style template)
-const INGESTIBLE = [".pdf", ".docx", ".txt", ".md", ".png", ".jpg", ".jpeg"];
+// Files the pipeline can read as knowledge (.docx/.pptx uploads are also used as style templates)
+const INGESTIBLE = [".pdf", ".docx", ".pptx", ".txt", ".md", ".png", ".jpg", ".jpeg"];
 
 // base64 makes files ~33% bigger, so the JSON limit is a bit above the file limit
 app.use(express.json({ limit: `${Math.ceil(MAX_UPLOAD_MB * 1.4)}mb` }));
@@ -72,6 +72,10 @@ app.get("/api/status", async (_req, res) => {
 
 app.post("/api/orchestrate", async (req, res) => {
   const { prompt, doc_template, ppt_template } = req.body;
+  // Files uploaded in this session; the RAG agent reads them first. Only plain file names are accepted.
+  const focusDocs = Array.isArray(req.body.focus_docs)
+    ? req.body.focus_docs.map((name: unknown) => path.basename(String(name))).slice(0, 10)
+    : [];
   if (!prompt?.trim()) return sendError(res, new Error("prompt is required"), 400);
 
   const docTemplate = safePath(TEMPLATE_DIR, doc_template || "templates_and_samples/Company_Proposal.docx");
@@ -81,7 +85,7 @@ app.post("/api/orchestrate", async (req, res) => {
   }
 
   try {
-    res.json(await runPython("orchestrate", { prompt, doc_template: docTemplate, ppt_template: pptTemplate }));
+    res.json(await runPython("orchestrate", { prompt, doc_template: docTemplate, ppt_template: pptTemplate, focus_docs: focusDocs }));
   } catch (err) {
     sendError(res, err);
   }

@@ -30,7 +30,8 @@ def run(command: str, payload: dict) -> dict:
         return run_workspace(payload)
     supervisor = SupervisorAgent("knowledge_store.db")
     if command == "orchestrate":
-        return supervisor.process_request(payload["prompt"], payload["doc_template"], payload["ppt_template"])
+        return supervisor.process_request(payload["prompt"], payload["doc_template"], payload["ppt_template"],
+                                          payload.get("focus_docs") or [])
     if command == "edit":
         return supervisor.handle_conversational_edit(payload["instruction"])
     if command == "convert":
