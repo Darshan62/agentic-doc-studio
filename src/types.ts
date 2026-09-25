@@ -33,7 +33,7 @@ export interface ValidationScorecard {
   file_path: string;
   status: string;
   quality_score: number;
-  checks: Record<string, any>;
+  checks: Record<string, boolean | number>;
 }
 
 export interface SystemStatus {
@@ -42,16 +42,36 @@ export interface SystemStatus {
   kb_documents: string[];
   versions_count: number;
   versions: VersionRecord[];
-  sample_files: {
-    docx_template: string;
-    pptx_template: string;
-    ocr_brief: string;
-  };
-  active_artifacts: {
-    docx: string | null;
-    pptx: string | null;
-    zip: string | null;
-  };
+  gemini_key_set: boolean;
+}
+
+// ----- Content written by Gemini (same shape as agents/content_writer.py) -----
+export interface DocSection {
+  heading: string;
+  paragraphs: string[];
+  bullets: string[];
+  table: { headers: string[]; rows: string[][] } | null;
+}
+
+export interface DeckSlide {
+  layout: 'bullets' | 'two_column' | 'three_pillar' | 'metrics' | 'table';
+  title: string;
+  summary?: string;
+  subtitle?: string;
+  points?: string[];
+  left_title?: string;
+  left_points?: string[];
+  right_title?: string;
+  right_points?: string[];
+  pillars?: { title: string; desc: string; metric: string }[];
+  metrics?: { value: string; label: string; desc: string }[];
+  headers?: string[];
+  rows?: string[][];
+}
+
+export interface GeneratedContent {
+  document: { title: string; subtitle: string; executive_summary: string; sections: DocSection[] };
+  deck: { title: string; subtitle: string; slides: DeckSlide[] };
 }
 
 export interface OrchestrationResult {
@@ -59,12 +79,29 @@ export interface OrchestrationResult {
   prompt: string;
   generated_docx: string;
   generated_pptx: string;
+  content: GeneratedContent;
   validation: {
     docx: ValidationScorecard;
     pptx: ValidationScorecard;
-    traceability: Record<string, any>;
+    traceability: { status: string; total_sources: number; sources_cited_in_text: number; uncited_sources: string[] };
   };
   citations_count: number;
   citations: Citation[];
   execution_steps: AgentStep[];
+}
+
+export interface EditResult {
+  status: string;
+  instruction: string;
+  version: string;
+  diff_summary: string[];
+  content: GeneratedContent;
+  artifacts: { docx: string; pptx: string };
+}
+
+export interface UploadResult {
+  status: string;
+  filename: string;
+  path: string;
+  ingest: { chunks_indexed: number; words: number; warning?: string } | null;
 }

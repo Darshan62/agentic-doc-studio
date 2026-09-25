@@ -91,6 +91,8 @@ class EnterpriseVectorStore:
 
         count = 0
         with self.conn:
+            # Re-uploading a file replaces its old chunks instead of mixing old and new text
+            self.conn.execute("DELETE FROM vector_chunks WHERE source_doc = ?", (doc_id,))
             for idx, c_text in enumerate(chunks):
                 chunk_id = f"{doc_id}_chunk_{idx}"
                 emb = compute_dense_embedding(c_text)

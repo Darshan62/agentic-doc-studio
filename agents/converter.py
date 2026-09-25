@@ -1,98 +1,63 @@
 """
 Bidirectional Conversion Agent
-Converts Word documents (.docx) into PowerPoint presentations (.pptx) and presentations into formal Word reports.
+Converts the current proposal into a slide deck, or the current deck into a proposal,
+by reshaping the content JSON and rendering it with the normal generators.
 """
-from typing import Dict, Any
+from typing import Any, Dict, List
+
+from agents.doc_generator import DocumentGenerationAgent
+from agents.ppt_generator import PptGenerationAgent
 from core.models import DocumentStyle, PresentationStyle
-from core.ooxml_docx import DocxBuilder, DocxReader
-from core.ooxml_pptx import PptxBuilder, PptxReader
+
+MAX_POINTS_PER_SLIDE = 5
+
+
+def document_to_deck(doc: Dict[str, Any]) -> Dict[str, Any]:
+    slides = []
+    for section in doc["sections"]:
+        paragraphs = section.get("paragraphs", [])
+        slides.append({
+            "layout": "bullets",
+            "title": section["heading"],
+            "summary": paragraphs[0] if paragraphs else "",
+            "points": (section.get("bullets") or paragraphs[1:])[:MAX_POINTS_PER_SLIDE],
+        })
+    return {"title": doc["title"], "subtitle": doc.get("subtitle", ""), "slides": slides}
+
+
+def slide_text(slide: Dict[str, Any]) -> List[str]:
+    """Flattens any slide layout into plain bullet lines."""
+    lines = list(slide.get("points", []))
+    lines += slide.get("left_points", []) + slide.get("right_points", [])
+    lines += [f"{p.get('title', '')}: {p.get('desc', '')}" for p in slide.get("pillars", [])]
+    lines += [f"{m.get('value', '')} {m.get('label', '')} — {m.get('desc', '')}" for m in slide.get("metrics", [])]
+    lines += [" | ".join(row) for row in slide.get("rows", [])]
+    return lines
+
+
+def deck_to_document(deck: Dict[str, Any]) -> Dict[str, Any]:
+    sections = []
+    for slide in deck["slides"]:
+        summary = slide.get("summary") or slide.get("subtitle")
+        sections.append({
+            "heading": slide.get("title", ""),
+            "paragraphs": [summary] if summary else [],
+            "bullets": slide_text(slide),
+            "table": None,
+        })
+    return {"title": deck["title"], "subtitle": deck.get("subtitle", ""), "executive_summary": "", "sections": sections}
+
 
 class BidirectionalConverterAgent:
     def __init__(self):
         self.name = "Bidirectional Conversion Agent"
 
-    def docx_to_pptx(self, docx_path: str, output_pptx_path: str = "output/Converted_From_Proposal.pptx") -> str:
-        reader = DocxReader(docx_path)
-        struct = reader.extract_structure()
+    def docx_to_pptx(self, content: Dict[str, Any], citations: List[Dict[str, Any]],
+                     output_path: str = "output/Converted_From_Proposal.pptx") -> str:
+        deck = document_to_deck(content["document"])
+        return PptGenerationAgent().generate(deck, PresentationStyle(), citations, output_path)
 
-        builder = PptxBuilder(
-            title=struct.get("title") or "Converted Proposal Presentation",
-            primary_color="0F2D59",
-            secondary_color="2563EB",
-            accent_color="10B981"
-        )
-
-        # Title slide
-        doc_title = struct.get("title") or "ENTERPRISE PROPOSAL"
-        builder.add_title_slide(
-            title=doc_title,
-            subtitle="Automated Conversion from Word Document Specification",
-            metadata="Converted Artifact | Enterprise Multi-Agent System"
-        )
-
-        # Executive slide
-        builder.add_executive_summary_slide(
-            title="Document Summary & Objectives",
-            summary_text="Synthesized directly from uploaded document sections and tables.",
-            highlights=[
-                f"Extracted {struct.get('word_count', 0)} words across formal headings.",
-                "Maintained typographic hierarchy and semantic section structure.",
-                "All tables and bullet points mapped into presentation cards."
-            ]
-        )
-
-        # Convert each major heading into a slide
-        headings = struct.get("headings", [])
-        if not headings:
-            headings = [("Heading1", "Strategic Initiatives"), ("Heading1", "System Architecture"), ("Heading1", "Next Steps")]
-
-        for h_style, h_text in headings[:6]:
-            builder.add_three_pillar_slide(
-                title=h_text,
-                subtitle="Synthesized section analysis and takeaways",
-                pillars=[
-                    {"title": "Core Finding", "desc": f"Derived from {h_text} requirements.", "metric": "Objective Met"},
-                    {"title": "Implementation", "desc": "Mapped into operational workflow milestones.", "metric": "SLA Compliant"},
-                    {"title": "Traceability", "desc": "Preserved citation provenance and cross-references.", "metric": "Verified"}
-                ]
-            )
-
-        builder.save(output_pptx_path)
-        return output_pptx_path
-
-    def pptx_to_docx(self, pptx_path: str, output_docx_path: str = "output/Converted_From_Presentation.docx") -> str:
-        reader = PptxReader(pptx_path)
-        struct = reader.extract_structure()
-
-        builder = DocxBuilder(
-            title="Narrative Report Converted from Presentation",
-            primary_font="Georgia",
-            heading_font="Arial",
-            primary_color="1B365D",
-            secondary_color="00A3E0"
-        )
-
-        pres_title = struct.get("titles", ["Enterprise Presentation"])[0]
-        builder.add_title_block(
-            title=pres_title,
-            subtitle="Comprehensive Narrative Report Synthesized from Slide Deck",
-            metadata={"Source Deck Slides": str(struct.get("slide_count", 0)), "Conversion Engine": "OpenXML Bidirectional Converter", "Date": "2025"}
-        )
-
-        builder.add_callout(
-            title="Executive Briefing & Synthesis",
-            body=f"This comprehensive narrative document was compiled directly from the {struct.get('slide_count', 0)}-slide presentation deck, converting visual cards and metrics into structured chapters.",
-            bg_color="F1F5F9",
-            border_color="1B365D"
-        )
-
-        for idx, slide_info in enumerate(struct.get("slides_content", []), start=1):
-            s_title = slide_info.get("title", f"Slide {idx}")
-            builder.add_heading_1(f"{idx}. {s_title}")
-            snippets = slide_info.get("text_snippets", [])
-            for snip in snippets[1:]:
-                if len(snip.strip()) > 3:
-                    builder.add_paragraph(snip)
-
-        builder.save(output_docx_path)
-        return output_docx_path
+    def pptx_to_docx(self, content: Dict[str, Any], citations: List[Dict[str, Any]],
+                     output_path: str = "output/Converted_From_Presentation.docx") -> str:
+        doc = deck_to_document(content["deck"])
+        return DocumentGenerationAgent().generate(doc, DocumentStyle(), citations, output_path)

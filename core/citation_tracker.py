@@ -1,15 +1,14 @@
 """
-Citation Provenance & End-to-End Traceability Tracker
-Maps document sections, slide items, and statistical claims to verified Web & RAG sources.
+Citation Tracker
+Gives every source an id like [Web-1] or [RAG-2] so the writer can cite it in the text.
 """
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
 import time
 from core.models import Citation
 
 class CitationTracker:
     def __init__(self):
         self.citations: List[Citation] = []
-        self.claim_mappings: List[Dict[str, Any]] = []
 
     def add_citation(self, source_type: str, title: str, reference: str, snippet: str, confidence: float = 0.95) -> str:
         cid_prefix = "Web" if source_type == "web" else "RAG"
@@ -28,16 +27,6 @@ class CitationTracker:
         self.citations.append(cit)
         return cid
 
-    def link_claim(self, target_artifact: str, target_location: str, claim_text: str, citation_ids: List[str]):
-        """Records traceability from an artifact location (e.g. 'Slide 3: Market Size' or 'Doc: Section 2') to sources."""
-        self.claim_mappings.append({
-            "target_artifact": target_artifact,
-            "target_location": target_location,
-            "claim_text": claim_text,
-            "citations": citation_ids,
-            "timestamp": time.time()
-        })
-
     def get_citations_list(self) -> List[Dict[str, Any]]:
         return [
             {
@@ -52,5 +41,3 @@ class CitationTracker:
             for c in self.citations
         ]
 
-    def get_traceability_matrix(self) -> List[Dict[str, Any]]:
-        return self.claim_mappings

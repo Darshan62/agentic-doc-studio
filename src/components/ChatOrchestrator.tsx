@@ -1,146 +1,168 @@
 import React, { useState, useRef } from 'react';
-import { 
-  Send, Sparkles, FileText, Presentation, Image, Upload, 
-  CheckCircle2, AlertCircle, Clock, ArrowRight, RefreshCw, FileCheck 
+import {
+  Send, Sparkles, FileText, Presentation, Upload, RefreshCw, FileCheck, Clock, Pencil, BookOpen,
 } from 'lucide-react';
-import { AgentStep, OrchestrationResult, SystemStatus } from '../types';
+
+import { postJson, errorMessage } from '../api';
+import { AgentStep, UploadResult } from '../types';
+
+const MAX_UPLOAD_MB = 25;
+const DEFAULT_DOC_TEMPLATE = 'templates_and_samples/Company_Proposal.docx';
+const DEFAULT_PPT_TEMPLATE = 'templates_and_samples/Company_Template.pptx';
+
+interface UploadedFile {
+  name: string;
+  message: string;
+  isError: boolean;
+}
 
 interface ChatOrchestratorProps {
   onRunOrchestration: (prompt: string, docTpl: string, pptTpl: string) => Promise<void>;
   onRunEdit: (instruction: string) => Promise<void>;
+  onUploaded: () => void;
   isProcessing: boolean;
   activeSteps: AgentStep[];
-  lastResult: OrchestrationResult | null;
-  status: SystemStatus | null;
+  hasResult: boolean;
+}
+
+const EDIT_SUGGESTIONS = [
+  'Add an executive summary slide.',
+  'Make the presentation more concise.',
+  'Add a competitive analysis section.',
+];
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Could not read the file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function describeUpload(result: UploadResult): string {
+  if (!result.ingest) return 'Saved (used as a style template)';
+  if (result.ingest.warning) return result.ingest.warning;
+  return `Indexed ${result.ingest.words} words into ${result.ingest.chunks_indexed} chunks`;
 }
 
 export const ChatOrchestrator: React.FC<ChatOrchestratorProps> = ({
   onRunOrchestration,
   onRunEdit,
+  onUploaded,
   isProcessing,
   activeSteps,
-  lastResult,
-  status,
+  hasResult,
 }) => {
   const [prompt, setPrompt] = useState(
-    'Research the latest Generative AI trends and create a proposal and 12-slide presentation using the same tone and style as the uploaded files.'
+    'Research the latest Generative AI trends and create a proposal and slide deck using my uploaded files.'
   );
-  const [selectedDoc, setSelectedDoc] = useState('templates_and_samples/Company_Proposal.docx');
-  const [selectedPpt, setSelectedPpt] = useState('templates_and_samples/Company_Template.pptx');
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [docTemplate, setDocTemplate] = useState(DEFAULT_DOC_TEMPLATE);
+  const [pptTemplate, setPptTemplate] = useState(DEFAULT_PPT_TEMPLATE);
+  const [uploads, setUploads] = useState<UploadedFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const quickPrompts = [
-    { label: '🚀 Primary Assignment Generation', prompt: 'Research the latest Generative AI trends and create a proposal and 12-slide presentation using the same tone and style as the uploaded files.', isNewRun: true },
-    { label: '📝 "Add an executive summary."', prompt: 'Add an executive summary.', isNewRun: false },
-    { label: '⚡ "Make the presentation more concise."', prompt: 'Make the presentation more concise.', isNewRun: false },
-    { label: '📊 "Add a competitive analysis section."', prompt: 'Add a competitive analysis section.', isNewRun: false },
-    { label: '🌐 "Update the report using the latest web information."', prompt: 'Update the report using the latest web information.', isNewRun: false },
-  ];
+  const addUpload = (upload: UploadedFile) => setUploads((prev) => [upload, ...prev]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset so picking the same file again still fires onChange
+    e.target.value = '';
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = reader.result as string;
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, base64Content: base64 }),
-        });
-        const data = await res.json();
-        if (data.status === 'uploaded') {
-          setUploadedFiles((prev) => [...prev, data.path]);
-          if (file.name.endsWith('.docx')) setSelectedDoc(data.path);
-          if (file.name.endsWith('.pptx')) setSelectedPpt(data.path);
-        }
-      } catch (err) {
-        console.error('Upload failed', err);
-      }
-    };
-    reader.readAsDataURL(file);
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      addUpload({ name: file.name, message: `Too large (max ${MAX_UPLOAD_MB} MB)`, isError: true });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const base64Content = await readAsDataUrl(file);
+      const result = await postJson<UploadResult>('/api/upload', { filename: file.name, base64Content });
+      if (result.filename.endsWith('.docx')) setDocTemplate(result.path);
+      if (result.filename.endsWith('.pptx')) setPptTemplate(result.path);
+      addUpload({ name: result.filename, message: describeUpload(result), isError: Boolean(result.ingest?.warning) });
+      onUploaded();
+    } catch (err) {
+      addUpload({ name: file.name, message: errorMessage(err), isError: true });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim() || isProcessing) return;
+    if (prompt.trim() && !isProcessing) onRunOrchestration(prompt, docTemplate, pptTemplate);
+  };
 
-    // If it's a conversational edit phrase or result already exists
-    const isEdit = !prompt.toLowerCase().includes('research') && (lastResult !== null || prompt.toLowerCase().includes('add') || prompt.toLowerCase().includes('make') || prompt.toLowerCase().includes('update'));
-    if (isEdit && lastResult) {
-      onRunEdit(prompt);
-    } else {
-      onRunOrchestration(prompt, selectedDoc, selectedPpt);
-    }
+  const handleEdit = () => {
+    if (prompt.trim() && !isProcessing) onRunEdit(prompt);
   };
 
   return (
     <div className="space-y-6">
-      {/* Template & Ingestion Context Bar */}
+      {/* Templates and uploaded knowledge */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
               <FileCheck className="w-4 h-4 text-blue-400" />
-              <span>Uploaded Template Context & Ingestion Pipeline</span>
+              <span>Templates & Knowledge Files</span>
             </h2>
             <p className="text-xs text-slate-400">
-              Analyzed for typography (Georgia/Arial), brand color palettes, margins, and 16:9 layouts
+              .docx / .pptx become style templates. PDF, DOCX, TXT and images are indexed so the agents can use them.
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              className="hidden"
-              accept=".docx,.pptx,.pdf,.png,.jpg"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center space-x-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5 text-blue-400" />
-              <span>Upload Custom Template</span>
-            </button>
-          </div>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            className="hidden"
+            accept=".docx,.pptx,.pdf,.txt,.md,.png,.jpg,.jpeg"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="flex items-center space-x-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {isUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-blue-400" />}
+            <span>{isUploading ? 'Uploading & indexing…' : 'Upload File'}</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-lg flex items-center space-x-3">
             <FileText className="w-8 h-8 text-blue-400 flex-shrink-0" />
             <div className="min-w-0">
               <span className="text-[10px] text-blue-300 font-bold uppercase block">Word Style Template</span>
-              <p className="text-xs text-white font-medium truncate">{selectedDoc.split('/').pop()}</p>
-              <span className="text-[10px] text-slate-400">Georgia & Arial • #1B365D Navy</span>
+              <p className="text-xs text-white font-medium truncate">{docTemplate.split('/').pop()}</p>
             </div>
           </div>
-
           <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-lg flex items-center space-x-3">
             <Presentation className="w-8 h-8 text-amber-400 flex-shrink-0" />
             <div className="min-w-0">
               <span className="text-[10px] text-amber-300 font-bold uppercase block">Presentation Template</span>
-              <p className="text-xs text-white font-medium truncate">{selectedPpt.split('/').pop()}</p>
-              <span className="text-[10px] text-slate-400">16:9 Widescreen • #0F2D59 & #2563EB</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-800/60 border border-slate-700/60 p-3 rounded-lg flex items-center space-x-3">
-            <Image className="w-8 h-8 text-emerald-400 flex-shrink-0" />
-            <div className="min-w-0">
-              <span className="text-[10px] text-emerald-300 font-bold uppercase block">Vision OCR Brief</span>
-              <p className="text-xs text-white font-medium truncate">Scanned_Architecture_Brief.png</p>
-              <span className="text-[10px] text-slate-400">Multi-Modal Zone OCR • 94% Conf</span>
+              <p className="text-xs text-white font-medium truncate">{pptTemplate.split('/').pop()}</p>
             </div>
           </div>
         </div>
+
+        {uploads.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {uploads.map((u, idx) => (
+              <li key={`${u.name}-${idx}`} className="flex items-center gap-2 text-xs">
+                <BookOpen className={`w-3.5 h-3.5 flex-shrink-0 ${u.isError ? 'text-red-400' : 'text-emerald-400'}`} />
+                <span className="text-slate-200 truncate">{u.name}</span>
+                <span className={u.isError ? 'text-red-300' : 'text-slate-400'}>— {u.message}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
-      {/* Interactive Chat & Prompt Execution Console */}
+      {/* Prompt console */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
         <div>
           <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
@@ -148,108 +170,85 @@ export const ChatOrchestrator: React.FC<ChatOrchestratorProps> = ({
             <span>Supervisor Command Console</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Send high-level research requests or natural-language conversational revision instructions
+            <b>Generate</b> creates a new proposal + deck. <b>Edit</b> changes the current one.
           </p>
         </div>
 
-        {/* Quick prompt badges */}
         <div className="flex flex-wrap gap-2">
-          {quickPrompts.map((qp, idx) => (
+          {EDIT_SUGGESTIONS.map((suggestion) => (
             <button
-              key={idx}
-              onClick={() => {
-                setPrompt(qp.prompt);
-                if (qp.isNewRun) {
-                  onRunOrchestration(qp.prompt, selectedDoc, selectedPpt);
-                } else {
-                  onRunEdit(qp.prompt);
-                }
-              }}
-              disabled={isProcessing}
-              className="text-xs bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-full transition-all hover:border-blue-500/50 cursor-pointer disabled:opacity-50 text-left"
+              key={suggestion}
+              onClick={() => setPrompt(suggestion)}
+              disabled={isProcessing || !hasResult}
+              title={hasResult ? 'Use as an edit instruction' : 'Generate something first'}
+              className="text-xs bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-40"
             >
-              {qp.label}
+              {suggestion}
             </button>
           ))}
         </div>
 
-        {/* Form Input */}
-        <form onSubmit={handleSubmit} className="relative">
+        <form onSubmit={handleGenerate} className="space-y-3">
           <textarea
             rows={3}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Type instructions for document and presentation synthesis or revisions..."
+            placeholder="Describe what to create, or how to change the current documents…"
             disabled={isProcessing}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3.5 pr-28 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none"
+            aria-label="Prompt"
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none"
           />
-          <button
-            type="submit"
-            disabled={isProcessing || !prompt.trim()}
-            className="absolute bottom-3 right-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg flex items-center space-x-2 transition-all shadow-md hover:shadow-indigo-500/20 disabled:opacity-40 cursor-pointer"
-          >
-            {isProcessing ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Executing...</span>
-              </>
-            ) : (
-              <>
-                <span>Run Agent</span>
-                <Send className="w-3.5 h-3.5" />
-              </>
-            )}
-          </button>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleEdit}
+              disabled={isProcessing || !prompt.trim() || !hasResult}
+              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg flex items-center space-x-2 disabled:opacity-40 cursor-pointer"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Edit current</span>
+            </button>
+            <button
+              type="submit"
+              disabled={isProcessing || !prompt.trim()}
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg flex items-center space-x-2 disabled:opacity-40 cursor-pointer"
+            >
+              {isProcessing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              <span>{isProcessing ? 'Agents working…' : 'Generate new'}</span>
+            </button>
+          </div>
         </form>
       </div>
 
-      {/* Real-time Agent Execution Trace */}
+      {/* Execution trace */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-2">
-            <Clock className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Multi-Agent Execution Trace</h3>
-          </div>
-          {isProcessing && (
-            <span className="text-xs text-blue-400 flex items-center space-x-1.5 animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              <span>Supervisor Dispatching Steps...</span>
-            </span>
-          )}
+        <div className="flex items-center space-x-2 mb-4">
+          <Clock className="w-4 h-4 text-indigo-400" />
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Multi-Agent Execution Trace</h3>
         </div>
 
         {activeSteps.length === 0 ? (
-          <div className="text-center py-10 border border-dashed border-slate-800 rounded-lg">
-            <p className="text-xs text-slate-400">
-              No active execution trace. Click one of the prompt triggers above to launch the 7-stage workflow!
-            </p>
-          </div>
+          <p className="text-xs text-slate-400 text-center py-10 border border-dashed border-slate-800 rounded-lg">
+            No runs yet. Upload files (optional), write a request and press <b>Generate new</b>.
+          </p>
         ) : (
           <div className="space-y-3">
-            {activeSteps.map((step, idx) => (
-              <div
-                key={idx}
-                className="bg-slate-800/40 border border-slate-700/60 rounded-lg p-3 flex items-start space-x-3 text-xs transition-all hover:bg-slate-800/70"
-              >
+            {activeSteps.map((step) => (
+              <div key={step.step_num} className="bg-slate-800/40 border border-slate-700/60 rounded-lg p-3 flex items-start space-x-3 text-xs">
                 <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center font-mono font-bold flex-shrink-0 text-[11px] mt-0.5">
                   {step.step_num}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-slate-200">{step.agent}</span>
-                      <span className="text-[10px] text-slate-400 font-mono">▸ {step.action}</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      COMPLETED
-                    </span>
+                  <div className="flex items-center space-x-2 mb-1">
+                    <span className="font-bold text-slate-200">{step.agent}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">▸ {step.action}</span>
                   </div>
-                  <p className="text-slate-300 text-xs leading-relaxed">{step.detail}</p>
+                  <p className="text-slate-300 leading-relaxed">{step.detail}</p>
                   {step.artifacts && step.artifacts.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {step.artifacts.map((art, aIdx) => (
-                        <span key={aIdx} className="text-[10px] bg-slate-900 text-cyan-300 px-2 py-0.5 rounded border border-slate-700 font-mono">
-                          📁 {art}
+                      {step.artifacts.map((art) => (
+                        <span key={art} className="text-[10px] bg-slate-900 text-cyan-300 px-2 py-0.5 rounded border border-slate-700 font-mono">
+                          {art}
                         </span>
                       ))}
                     </div>

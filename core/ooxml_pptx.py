@@ -4,11 +4,16 @@ Generates valid Microsoft PowerPoint (.pptx) presentations strictly adhering to 
 Widescreen 16:9 layout (12192000 x 6858000 EMU).
 """
 import io
+from collections import Counter
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+from core.ooxml_package import image_info
+from core.ooxml_parts import (IMAGE_DEFAULTS, LAYOUT_CT, MASTER_CT, THEME_CT, pptx_picture_xml, rels_xml,
+                              slide_layout_xml, slide_master_xml, theme_xml)
 
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -16,6 +21,9 @@ R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 SLIDE_WIDTH = 12192000   # 16:9 EMU
 SLIDE_HEIGHT = 6858000  # 16:9 EMU
+EMU_PER_INCH = 914400
+TITLE_LOGO_WIDTH = int(1.8 * EMU_PER_INCH)
+SLIDE_LOGO_WIDTH = int(0.9 * EMU_PER_INCH)
 
 def make_shape_xml(sp_id: int, name: str, x: int, y: int, cx: int, cy: int, text_runs: List[Dict[str, Any]],
                    fill_color: Optional[str] = None, border_color: Optional[str] = None, border_width: int = 12700,
@@ -36,17 +44,23 @@ def make_shape_xml(sp_id: int, name: str, x: int, y: int, cx: int, cy: int, text
         runs = p.get("runs", [])
         if not runs and "text" in p:
             runs = [{"text": p["text"], "bold": p.get("bold", False), "size": p.get("size", 14), "color": p.get("color", "333333")}]
-            
+
+        # A leading "\n" in the layouts below means "gap before this paragraph". A raw newline
+        # inside <a:t> is not a line break in PowerPoint, so it becomes paragraph spacing instead.
+        spacing = '<a:spcBef><a:spcPts val="600"/></a:spcBef>' if runs and str(runs[0].get("text", "")).startswith("\n") else ""
+        bullet = '<a:buFont typeface="Arial"/><a:buChar char="&#8226;"/>' if p.get("bullet") else ""
+        indent = ' marL="285750" indent="-285750"' if p.get("bullet") else ""
+
         r_xmls = []
         for r in runs:
-            t_esc = escape(r.get("text", ""))
+            t_esc = escape(r.get("text", "").lstrip("\n"))
             sz = int(r.get("size", 14) * 100)
             b_attr = ' b="1"' if r.get("bold", False) else ' b="0"'
             i_attr = ' i="1"' if r.get("italic", False) else ''
             clr = r.get("color", "333333")
             r_xmls.append(f'<a:r><a:rPr lang="en-US" sz="{sz}"{b_attr}{i_attr} dirty="0"><a:solidFill><a:srgbClr val="{clr}"/></a:solidFill></a:rPr><a:t>{t_esc}</a:t></a:r>')
             
-        paras_xml.append(f'<a:p><a:pPr algn="{al_val}"/>{"".join(r_xmls)}</a:p>')
+        paras_xml.append(f'<a:p><a:pPr algn="{al_val}"{indent}>{spacing}{bullet}</a:pPr>{"".join(r_xmls)}</a:p>')
 
     tx_body = "".join(paras_xml) if paras_xml else '<a:p><a:endParaRPr/></a:p>'
 
@@ -85,6 +99,36 @@ class PptxBuilder:
         self.bg_color = bg_color
         self.primary_font = primary_font
         self.slides: List[Dict[str, Any]] = []
+        self.images: List[bytes] = []
+        self.logo: Optional[Tuple[int, float]] = None  # (image index, height / width)
+
+    def set_logo(self, data: bytes) -> None:
+        """Shows the picture large on the title slide and small in the corner of every other slide."""
+        _, width, height = image_info(data)
+        self.images.append(data)
+        self.logo = (len(self.images) - 1, height / width)
+
+    def media_name(self, index: int) -> str:
+        return f"image{index + 1}.{image_info(self.images[index])[0]}"
+
+    def logo_shape(self, slide_type: str) -> Optional[Dict[str, Any]]:
+        if self.logo is None:
+            return None
+        index, ratio = self.logo
+        if slide_type == "title":
+            cx = TITLE_LOGO_WIDTH
+            return {"type": "picture", "image": index, "name": "Company Logo",
+                    "x": 1000000, "y": 500000, "cx": cx, "cy": int(cx * ratio)}
+        cx = SLIDE_LOGO_WIDTH
+        return {"type": "picture", "image": index, "name": "Company Logo",
+                "x": SLIDE_WIDTH - 600000 - cx, "y": 250000, "cx": cx, "cy": int(cx * ratio)}
+
+    def add_bullet_slide(self, title: str, category: str, bullets: List[str]):
+        shapes = self.add_header_elements(title, category)
+        paras = [{"bullet": True, "runs": [{"text": b, "size": 18, "color": "1E293B"}]} for b in bullets]
+        shapes.append({"type": "text", "name": "Content Placeholder", "x": 800000, "y": 1800000,
+                       "cx": 10592000, "cy": 4400000, "paras": paras})
+        self.slides.append({"type": "bullets", "title": title, "shapes": shapes})
 
     def add_title_slide(self, title: str, subtitle: str, metadata: str = "Confidential | Enterprise Strategy 2025"):
         slide = {
@@ -96,17 +140,17 @@ class PptxBuilder:
                 # Top accent banner
                 {"type": "rect", "x": 0, "y": 0, "cx": SLIDE_WIDTH, "cy": 180000, "fill": self.secondary_color},
                 # Main Title Card
-                {"type": "text", "x": 1000000, "y": 1800000, "cx": 10192000, "cy": 1800000,
+                {"type": "text", "name": "Title", "x": 1000000, "y": 1800000, "cx": 10192000, "cy": 1800000,
                  "paras": [
                      {"align": "center", "runs": [{"text": title, "bold": True, "size": 36, "color": self.primary_color}]}
                  ]},
                 # Subtitle
-                {"type": "text", "x": 1200000, "y": 3600000, "cx": 9792000, "cy": 1200000,
+                {"type": "text", "name": "Subtitle", "x": 1200000, "y": 3600000, "cx": 9792000, "cy": 1200000,
                  "paras": [
                      {"align": "center", "runs": [{"text": subtitle, "bold": False, "size": 20, "color": "475569"}]}
                  ]},
                 # Bottom metadata bar
-                {"type": "text", "x": 1000000, "y": 5800000, "cx": 10192000, "cy": 500000,
+                {"type": "text", "name": "Footer", "x": 1000000, "y": 5800000, "cx": 10192000, "cy": 500000,
                  "paras": [
                      {"align": "center", "runs": [{"text": metadata, "bold": False, "size": 12, "color": "94A3B8"}]}
                  ]}
@@ -119,10 +163,10 @@ class PptxBuilder:
             # Header accent line
             {"type": "rect", "x": 800000, "y": 450000, "cx": 400000, "cy": 40000, "fill": self.accent_color},
             # Category eyebrow
-            {"type": "text", "x": 800000, "y": 550000, "cx": 10500000, "cy": 300000,
+            {"type": "text", "name": "Category", "x": 800000, "y": 550000, "cx": 10500000, "cy": 300000,
              "paras": [{"runs": [{"text": category.upper(), "bold": True, "size": 11, "color": self.secondary_color}]}]},
             # Slide Title
-            {"type": "text", "x": 800000, "y": 850000, "cx": 10500000, "cy": 700000,
+            {"type": "text", "name": "Title", "x": 800000, "y": 850000, "cx": 10500000, "cy": 700000,
              "paras": [{"runs": [{"text": title, "bold": True, "size": 26, "color": self.primary_color}]}]},
             # Subtle header divider
             {"type": "rect", "x": 800000, "y": 1550000, "cx": 10592000, "cy": 20000, "fill": "E2E8F0"}
@@ -187,18 +231,18 @@ class PptxBuilder:
         gap = 392000
         
         # Col 1
-        c1_paras = [{"runs": [{"text": col1_title, "bold": True, "size": 16, "color": self.primary_color}]}]
+        c1_paras: List[Dict[str, Any]] = [{"runs": [{"text": col1_title, "bold": True, "size": 16, "color": self.primary_color}]}]
         for pt in col1_points:
-            c1_paras.append({"runs": [{"text": f"\n• {pt}", "bold": False, "size": 13, "color": "334155"}]})
+            c1_paras.append({"bullet": True, "runs": [{"text": pt, "bold": False, "size": 13, "color": "334155"}]})
         shapes.append({
             "type": "card", "x": 800000, "y": 1800000, "cx": col_w, "cy": 4400000,
             "fill": "FFFFFF", "border": "E2E8F0", "paras": c1_paras
         })
         
         # Col 2
-        c2_paras = [{"runs": [{"text": col2_title, "bold": True, "size": 16, "color": self.secondary_color}]}]
+        c2_paras: List[Dict[str, Any]] = [{"runs": [{"text": col2_title, "bold": True, "size": 16, "color": self.secondary_color}]}]
         for pt in col2_points:
-            c2_paras.append({"runs": [{"text": f"\n• {pt}", "bold": False, "size": 13, "color": "334155"}]})
+            c2_paras.append({"bullet": True, "runs": [{"text": pt, "bold": False, "size": 13, "color": "334155"}]})
         shapes.append({
             "type": "card", "x": 800000 + col_w + gap, "y": 1800000, "cx": col_w, "cy": 4400000,
             "fill": "FFFFFF", "border": "E2E8F0", "paras": c2_paras
@@ -249,28 +293,6 @@ class PptxBuilder:
         })
         self.slides.append({"type": "table", "title": title, "shapes": shapes})
 
-    def add_roadmap_slide(self, title: str, phases: List[Dict[str, Any]]):
-        shapes = self.add_header_elements(title, "IMPLEMENTATION ROADMAP")
-        num_phases = min(4, len(phases))
-        phase_w = int(10592000 / num_phases) - 150000
-        start_x = 800000
-        for i, p in enumerate(phases[:4]):
-            x = start_x + i * (phase_w + 150000)
-            q_name = p.get("quarter", f"Phase {i+1}")
-            p_name = p.get("name", "")
-            milestones = p.get("milestones", [])
-            paras = [
-                {"runs": [{"text": q_name, "bold": True, "size": 18, "color": self.secondary_color}]},
-                {"runs": [{"text": f"\n{p_name}\n", "bold": True, "size": 14, "color": self.primary_color}]}
-            ]
-            for m in milestones:
-                paras.append({"runs": [{"text": f"\n• {m}", "bold": False, "size": 11, "color": "475569"}]})
-            shapes.append({
-                "type": "card", "x": x, "y": 1800000, "cx": phase_w, "cy": 4400000,
-                "fill": "FFFFFF", "border": "E2E8F0", "paras": paras
-            })
-        self.slides.append({"type": "roadmap", "title": title, "shapes": shapes})
-
     def add_citations_slide(self, title: str, citations: List[Dict[str, str]]):
         shapes = self.add_header_elements(title, "PROVENANCE & CITATIONS")
         paras = [
@@ -293,27 +315,30 @@ class PptxBuilder:
         })
         self.slides.append({"type": "citations", "title": title, "shapes": shapes})
 
-    def make_concise(self):
-        """Conversational edit operation: trims verbose text and makes all slides punchy and concise."""
-        for s in self.slides:
-            for shp in s.get("shapes", []):
-                for p in shp.get("paras", []):
-                    for r in p.get("runs", []):
-                        text = r.get("text", "")
-                        # Shorten lengthy sentences
-                        if len(text) > 90 and not r.get("bold", False):
-                            parts = text.split(". ")
-                            if len(parts) > 1:
-                                r["text"] = parts[0] + " (Concise summary)."
-
-    def generate_slide_xml(self, slide_data: Dict[str, Any], slide_num: int) -> str:
+    def generate_slide_xml(self, slide_data: Dict[str, Any], slide_num: int) -> Tuple[List[Tuple[str, str, str]], str]:
+        """Returns the slide relationships (layout first, then one per picture) and the slide XML."""
+        rels: List[Tuple[str, str, str]] = [("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml")]
+        image_rels: Dict[int, str] = {}
+        shapes = list(slide_data.get("shapes", []))
+        logo = self.logo_shape(slide_data.get("type", ""))
+        if logo:
+            shapes.append(logo)
         sp_elements = []
         # Background rect
         sp_elements.append(make_shape_xml(1, "Background", 0, 0, SLIDE_WIDTH, SLIDE_HEIGHT, [], fill_color=self.bg_color))
         
         sp_id = 2
-        for shp in slide_data.get("shapes", []):
+        for shp in shapes:
             stype = shp.get("type", "rect")
+            if stype == "picture":
+                image = shp["image"]
+                if image not in image_rels:
+                    image_rels[image] = f"rId{len(rels) + 1}"
+                    rels.append((image_rels[image], "image", f"../media/{self.media_name(image)}"))
+                sp_elements.append(pptx_picture_xml(sp_id, shp.get("name", "Picture"), image_rels[image],
+                                                    shp["x"], shp["y"], shp["cx"], shp["cy"]))
+                sp_id += 1
+                continue
             x = shp.get("x", 0)
             y = shp.get("y", 0)
             cx = shp.get("cx", 1000000)
@@ -322,11 +347,12 @@ class PptxBuilder:
             border = shp.get("border")
             border_w = shp.get("border_w", 12700)
             paras = shp.get("paras", [])
-            sp_elements.append(make_shape_xml(sp_id, f"Shape_{sp_id}", x, y, cx, cy, paras, fill_color=fill, border_color=border, border_width=border_w, radius=10 if stype=="card" else None))
+            name = f"{shp['name']} {sp_id}" if shp.get("name") else f"Shape_{sp_id}"
+            sp_elements.append(make_shape_xml(sp_id, name, x, y, cx, cy, paras, fill_color=fill, border_color=border, border_width=border_w, radius=10 if stype=="card" else None))
             sp_id += 1
 
         shapes_str = "\n".join(sp_elements)
-        return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        return rels, f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:p="{P_NS}" xmlns:a="{A_NS}" xmlns:r="{R_NS}">
   <p:cSld>
     <p:spTree>
@@ -359,7 +385,11 @@ class PptxBuilder:
         types_overrides = [
             '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
             '<Default Extension="xml" ContentType="application/xml"/>',
+            IMAGE_DEFAULTS,
             '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>',
+            f'<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="{MASTER_CT}"/>',
+            f'<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="{LAYOUT_CT}"/>',
+            f'<Override PartName="/ppt/theme/theme1.xml" ContentType="{THEME_CT}"/>',
             '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>',
             '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
         ]
@@ -379,29 +409,25 @@ class PptxBuilder:
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>"""
 
-        # ppt/presentation.xml
+        # ppt/presentation.xml (slides are rId1..N, then the master and the theme)
+        master_rid, theme_rid = f"rId{slide_count + 1}", f"rId{slide_count + 2}"
         sld_id_list = []
         for i in range(1, slide_count + 1):
             sld_id_list.append(f'<p:sldId id="{255 + i}" r:id="rId{i}"/>')
-            
+
         pres_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:p="{P_NS}" xmlns:a="{A_NS}" xmlns:r="{R_NS}">
-  <p:sldMasterIdLst/>
+  <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="{master_rid}"/></p:sldMasterIdLst>
   <p:sldIdLst>
     {"".join(sld_id_list)}
   </p:sldIdLst>
-  <p:sldSz cx="{SLIDE_WIDTH}" cy="{SLIDE_HEIGHT}" type="screen16x9"/>
+  <p:sldSz cx="{SLIDE_WIDTH}" cy="{SLIDE_HEIGHT}"/>
   <p:notesSz cx="{SLIDE_HEIGHT}" cy="{SLIDE_WIDTH}"/>
 </p:presentation>"""
 
-        # ppt/_rels/presentation.xml.rels
-        pres_rels_list = []
-        for i in range(1, slide_count + 1):
-            pres_rels_list.append(f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{i}.xml"/>')
-        pres_rels = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  {"".join(pres_rels_list)}
-</Relationships>"""
+        pres_rels = rels_xml([(f"rId{i}", "slide", f"slides/slide{i}.xml") for i in range(1, slide_count + 1)]
+                             + [(master_rid, "slideMaster", "slideMasters/slideMaster1.xml"),
+                                (theme_rid, "theme", "theme/theme1.xml")])
 
         core_props = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
@@ -427,10 +453,20 @@ class PptxBuilder:
             zf.writestr("ppt/_rels/presentation.xml.rels", pres_rels)
             zf.writestr("docProps/core.xml", core_props)
             zf.writestr("docProps/app.xml", app_props)
+            zf.writestr("ppt/slideMasters/slideMaster1.xml", slide_master_xml())
+            zf.writestr("ppt/slideMasters/_rels/slideMaster1.xml.rels", rels_xml([
+                ("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rId2", "theme", "../theme/theme1.xml")]))
+            zf.writestr("ppt/slideLayouts/slideLayout1.xml", slide_layout_xml())
+            zf.writestr("ppt/slideLayouts/_rels/slideLayout1.xml.rels", rels_xml([
+                ("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]))
+            zf.writestr("ppt/theme/theme1.xml", theme_xml(self.primary_font, self.primary_color, self.secondary_color))
+            for index, data in enumerate(self.images):
+                zf.writestr(f"ppt/media/{self.media_name(index)}", data)
 
             for i, s_data in enumerate(self.slides, start=1):
-                s_xml = self.generate_slide_xml(s_data, i)
+                s_rels, s_xml = self.generate_slide_xml(s_data, i)
                 zf.writestr(f"ppt/slides/slide{i}.xml", s_xml)
+                zf.writestr(f"ppt/slides/_rels/slide{i}.xml.rels", rels_xml(s_rels))
 
         return buf.getvalue()
 
@@ -453,21 +489,21 @@ class PptxReader:
         result = {
             "slide_count": 0,
             "titles": [],
-            "detected_fonts": set(),
-            "detected_colors": set(),
+            "detected_fonts": [],
+            "detected_colors": [],
             "slides_content": []
         }
         try:
             with zipfile.ZipFile(io.BytesIO(self.bytes_data)) as zf:
-                slide_files = [n for n in zf.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
-                # Sort numerically
-                slide_files.sort(key=lambda x: int(re.search(r'slide(\d+)\.xml', x).group(1)) if re.search(r'slide(\d+)\.xml', x) else 0)
+                slide_files = [n for n in zf.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)]
+                # Sort numerically so slide10 comes after slide9
+                slide_files.sort(key=lambda name: int(re.sub(r"\D", "", name)))
                 result["slide_count"] = len(slide_files)
 
                 for sf in slide_files:
                     s_xml = zf.read(sf).decode("utf-8", errors="ignore")
                     colors = re.findall(r'val="([0-9A-Fa-f]{6})"', s_xml)
-                    result["detected_colors"].update(colors)
+                    result["detected_colors"].extend(colors)
 
                     tree = ET.fromstring(s_xml)
                     texts = []
@@ -482,6 +518,7 @@ class PptxReader:
         except Exception as e:
             result["error"] = str(e)
 
-        result["detected_colors"] = list(result["detected_colors"])
-        result["detected_fonts"] = list(result["detected_fonts"])
+        result["detected_colors"] = [v for v, _ in Counter(result["detected_colors"]).most_common()]
+        # Most frequent first, so the "primary" colour/font is the dominant one
+        result["detected_fonts"] = [v for v, _ in Counter(result["detected_fonts"]).most_common()]
         return result

@@ -1,26 +1,23 @@
 import React, { useState } from 'react';
 import { RefreshCw, FileText, Presentation, ArrowRight, Download, CheckCircle2 } from 'lucide-react';
 
+import { postJson, errorMessage } from '../api';
+
 export const ConverterPanel: React.FC = () => {
   const [direction, setDirection] = useState<'docx_to_pptx' | 'pptx_to_docx'>('docx_to_pptx');
   const [isConverting, setIsConverting] = useState(false);
   const [convertedArtifact, setConvertedArtifact] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleConvert = async () => {
     setIsConverting(true);
     setConvertedArtifact(null);
+    setError(null);
     try {
-      const res = await fetch('/api/convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direction }),
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        setConvertedArtifact(data.artifact);
-      }
+      const data = await postJson<{ artifact: string }>('/api/convert', { direction });
+      setConvertedArtifact(data.artifact);
     } catch (err) {
-      console.error('Conversion failed', err);
+      setError(errorMessage(err));
     } finally {
       setIsConverting(false);
     }
@@ -98,6 +95,8 @@ export const ConverterPanel: React.FC = () => {
             <span>Run {direction === 'docx_to_pptx' ? 'DOCX → PPTX' : 'PPTX → DOCX'} Conversion</span>
           )}
         </button>
+
+        {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
 
         {/* Conversion Result */}
         {convertedArtifact && (

@@ -14,6 +14,37 @@ The platform features:
 
 ---
 
+## ✍️ AI Editor Workspace (chat-driven DOCX/PPTX editing)
+
+The default **AI Editor Workspace** tab is a split screen: chat on the left, a live preview of the open
+`.docx` / `.pptx` on the right. Plain-English requests become validated JSON edit commands that a
+deterministic OpenXML editor applies to the real file. The model never writes code or XML.
+
+```
+message → Edit Intent Parser (Gemini, JSON only; built-in rule parser as fallback)
+        → core/edit_schema.py validate_command (whitelisted actions / targets / values)
+        → core/docx_editor.py or core/pptx_editor.py (targeted in-place XML edits)
+        → saved working copy + version snapshot (v1.0, v1.1, …) → preview JSON → chat reply
+```
+
+| Word (.docx) | PowerPoint (.pptx) |
+|---|---|
+| `update_style` (font, size, bold, italic, underline, colour, alignment) | `update_style` |
+| `update_text`, `replace_text`, `delete_text`, `insert_text` | `update_text`, `replace_text`, `delete_text` (text or bullet) |
+| `delete_paragraph`, `insert_paragraph` (after/before a heading or paragraph, start, end) | `add_text` (new bullet), `delete_slide` |
+| `replace_image`, `resize_image` (the logo) | `replace_image`, `resize_image`, `move_image` |
+
+- Ambiguous requests get a clarifying question (with clickable options when several paragraphs/images match).
+- Click a paragraph, text box or the logo in the preview, then say “this” (“Remove this paragraph”).
+- Every successful edit is a new version. Undo/redo and the version menu restore earlier versions.
+- The original file is never modified: the workspace edits a copy in `output/workspace/`.
+- Demo files: `python -m templates_and_samples.create_demo_files` rebuilds `templates_and_samples/demo/`.
+- `EDIT_PARSER=auto|gemini|rules` (default `auto`: Gemini first, rule parser on any Gemini failure).
+- Run: `npm install`, `pip install -r requirements.txt`, `npm run dev`, then open http://127.0.0.1:3000.
+- Tests: `python -m unittest tests.test_multi_agent_system tests.test_edit_engine tests.test_edit_operations tests.test_editor_workspace`.
+
+---
+
 ## 🏛️ System Architecture
 
 ```text

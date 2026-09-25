@@ -1,72 +1,62 @@
 """
-Python Bridge CLI for the Multi-Agent System
-Called by Express server endpoints to execute orchestration, edits, conversions, and diagnostics.
-Outputs strictly valid JSON to stdout.
+Python bridge called by the Express server:  python run_pipeline.py <command> '<json payload>'
+Always prints one JSON object. On failure it prints {"error": ...} and exits with code 1.
 """
-import sys
 import json
 import os
+import sys
+
 from agents.supervisor import SupervisorAgent
+from agents.workspace_agent import run_workspace
+from core.gemini_client import GeminiError
 from scripts.package_project import package_project
 
-def main():
+
+def get_status(supervisor: SupervisorAgent) -> dict:
+    return {
+        "status": "ready",
+        "kb_chunks_indexed": supervisor.vector_store.count_chunks(),
+        "kb_documents": supervisor.vector_store.list_indexed_docs(),
+        "versions_count": len(supervisor.version_manager.get_history()),
+        "versions": supervisor.version_manager.get_history(),
+        "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
+    }
+
+
+def run(command: str, payload: dict) -> dict:
+    if command == "workspace":
+        # The editor workspace doesn't need the knowledge base, so skip building the supervisor
+        return run_workspace(payload)
+    supervisor = SupervisorAgent("knowledge_store.db")
+    if command == "orchestrate":
+        return supervisor.process_request(payload["prompt"], payload["doc_template"], payload["ppt_template"])
+    if command == "edit":
+        return supervisor.handle_conversational_edit(payload["instruction"])
+    if command == "convert":
+        return supervisor.handle_conversion(payload.get("direction", "docx_to_pptx"))
+    if command == "ingest":
+        return supervisor.ingest_file(payload["path"])
+    if command == "search":
+        return supervisor.search(payload["query"])
+    if command == "get_status":
+        return get_status(supervisor)
+    if command == "package_zip":
+        return {"status": "success", "zip_path": package_project()}
+    raise ValueError(f"Unknown command: {command}")
+
+
+def main() -> None:
     if len(sys.argv) < 2:
         print(json.dumps({"error": "Missing command argument"}))
         sys.exit(1)
 
-    cmd = sys.argv[1]
-    supervisor = SupervisorAgent("knowledge_store.db")
+    payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    try:
+        print(json.dumps(run(sys.argv[1], payload)))
+    except (GeminiError, ValueError, KeyError) as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
-    if cmd == "orchestrate":
-        # Read payload from stdin or argv
-        payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else json.load(sys.stdin)
-        prompt = payload.get("prompt", "Research the latest Generative AI trends and create a proposal and 12-slide presentation")
-        doc_tpl = payload.get("doc_template", "templates_and_samples/Company_Proposal.docx")
-        ppt_tpl = payload.get("ppt_template", "templates_and_samples/Company_Template.pptx")
-        
-        res = supervisor.process_request(prompt, doc_tpl, ppt_tpl)
-        print(json.dumps(res, indent=2))
-
-    elif cmd == "edit":
-        payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else json.load(sys.stdin)
-        instruction = payload.get("instruction", "Add an executive summary.")
-        res = supervisor.handle_conversational_edit(instruction)
-        print(json.dumps(res, indent=2))
-
-    elif cmd == "convert":
-        payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else json.load(sys.stdin)
-        direction = payload.get("direction", "docx_to_pptx")
-        res = supervisor.handle_conversion(direction)
-        print(json.dumps(res, indent=2))
-
-    elif cmd == "package_zip":
-        zip_path = package_project()
-        print(json.dumps({"status": "success", "zip_path": zip_path, "download_url": "/downloads/multi_agent_doc_ppt_system.zip"}))
-
-    elif cmd == "get_status":
-        history = supervisor.version_manager.get_history()
-        count = supervisor.vector_store.count_chunks()
-        indexed_docs = supervisor.vector_store.list_indexed_docs()
-        print(json.dumps({
-            "status": "ready",
-            "kb_chunks_indexed": count,
-            "kb_documents": indexed_docs,
-            "versions_count": len(history),
-            "versions": history,
-            "sample_files": {
-                "docx_template": "templates_and_samples/Company_Proposal.docx",
-                "pptx_template": "templates_and_samples/Company_Template.pptx",
-                "ocr_brief": "templates_and_samples/Scanned_Architecture_Brief.png"
-            },
-            "active_artifacts": {
-                "docx": "output/Company_Proposal_Generated.docx" if os.path.exists("output/Company_Proposal_Generated.docx") else None,
-                "pptx": "output/Company_Presentation_Generated.pptx" if os.path.exists("output/Company_Presentation_Generated.pptx") else None,
-                "zip": "public/downloads/multi_agent_doc_ppt_system.zip" if os.path.exists("public/downloads/multi_agent_doc_ppt_system.zip") else None
-            }
-        }, indent=2))
-
-    else:
-        print(json.dumps({"error": f"Unknown command: {cmd}"}))
 
 if __name__ == "__main__":
     main()

@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* Briefly highlights what the last edit changed in the live preview */
+@keyframes ws-flash {
+  0%, 60% {
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.9);
+    background-color: rgba(254, 243, 199, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+}
+
+.ws-flash {
+  animation: ws-flash 2.6s ease-out 1;
+}
+
+/* Horizontally scrollable chip rows without a bulky scrollbar */
+.ws-no-scrollbar {
+  scrollbar-width: none;
+}
+.ws-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-flash {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.9);
+  }
+}

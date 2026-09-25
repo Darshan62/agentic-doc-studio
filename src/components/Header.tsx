@@ -17,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeAgentsCount,
 }) => {
   const navTabs = [
+    { id: 'workspace', label: 'AI Editor Workspace' },
     { id: 'chat', label: 'Chat & Orchestrator' },
     { id: 'artifacts', label: 'Generated DOCX & 12-Slide Deck' },
     { id: 'rag', label: 'Enterprise RAG & Vectors' },

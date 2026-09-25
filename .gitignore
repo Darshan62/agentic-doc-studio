@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated at runtime
+__pycache__/
+output/
+versions/
+knowledge_store.db
+templates_and_samples/uploads/
+public/downloads/
+.playwright-mcp/

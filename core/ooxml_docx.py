@@ -3,19 +3,24 @@ Pure-Python OpenXML DOCX Builder and Reader
 Generates valid Microsoft Word (.docx) files adhering strictly to the ECMA-376 OpenXML standard.
 """
 import io
+from collections import Counter
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from typing import List, Dict, Any, Optional
 
+from core.ooxml_package import image_info
+from core.ooxml_parts import IMAGE_DEFAULTS, WP_NS, docx_picture_xml
+
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
-CONTENT_TYPES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+CONTENT_TYPES_XML = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  {IMAGE_DEFAULTS}
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -32,7 +37,10 @@ RELS_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 DOC_RELS_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  {image_rels}
 </Relationships>"""
+IMAGE_REL = '<Relationship Id="rIdImg{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/{name}"/>'
+
 
 def get_styles_xml(primary_font="Georgia", heading_font="Arial", primary_color="1B365D", secondary_color="00A3E0"):
     return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -102,6 +110,18 @@ class DocxBuilder:
         self.primary_color = primary_color
         self.secondary_color = secondary_color
         self.paragraphs_xml: List[str] = []
+        self.images: List[bytes] = []
+
+    def image_name(self, index: int) -> str:
+        return f"image{index + 1}.{image_info(self.images[index])[0]}"
+
+    def add_image(self, data: bytes, width_emu: int, name: str = "Company Logo", align: str = "left"):
+        """Adds a picture in its own paragraph; the height follows the picture's proportions."""
+        _, width, height = image_info(data)
+        self.images.append(data)
+        number = len(self.images)
+        picture = docx_picture_xml(number, name, f"rIdImg{number}", width_emu, int(width_emu * height / width))
+        self.paragraphs_xml.append(f'<w:p><w:pPr><w:jc w:val="{align}"/></w:pPr>{picture}</w:p>')
 
     def add_title_block(self, title: str, subtitle: Optional[str] = None, metadata: Optional[Dict[str, str]] = None):
         t_esc = escape(title)
@@ -164,30 +184,6 @@ class DocxBuilder:
         xml = f"""<w:p>
   <w:pPr>
     <w:pStyle w:val="Heading1"/>
-  </w:pPr>
-  <w:r>
-    <w:t>{t_esc}</w:t>
-  </w:r>
-</w:p>"""
-        self.paragraphs_xml.append(xml)
-
-    def add_heading_2(self, text: str):
-        t_esc = escape(text)
-        xml = f"""<w:p>
-  <w:pPr>
-    <w:pStyle w:val="Heading2"/>
-  </w:pPr>
-  <w:r>
-    <w:t>{t_esc}</w:t>
-  </w:r>
-</w:p>"""
-        self.paragraphs_xml.append(xml)
-
-    def add_heading_3(self, text: str):
-        t_esc = escape(text)
-        xml = f"""<w:p>
-  <w:pPr>
-    <w:pStyle w:val="Heading3"/>
   </w:pPr>
   <w:r>
     <w:t>{t_esc}</w:t>
@@ -348,55 +344,10 @@ class DocxBuilder:
 </w:tbl>"""
         self.paragraphs_xml.append(tbl_xml)
 
-    def prepend_executive_summary(self, summary_text: str):
-        # Insert callout at index right after title block (index 2 or 3)
-        t_esc = escape("Executive Summary (Updated)")
-        b_esc = escape(summary_text)
-        xml = f"""<w:tbl>
-  <w:tblPr>
-    <w:tblW w:w="9200" w:type="dxa"/>
-    <w:tblBorders>
-      <w:left w:val="single" w:sz="36" w:space="0" w:color="{self.primary_color}"/>
-      <w:top w:val="none"/>
-      <w:right w:val="none"/>
-      <w:bottom w:val="none"/>
-    </w:tblBorders>
-    <w:tblCellMar>
-      <w:top w:w="180" w:type="dxa"/>
-      <w:bottom w:w="180" w:type="dxa"/>
-      <w:left w:w="240" w:type="dxa"/>
-      <w:right w:w="240" w:type="dxa"/>
-    </w:tblCellMar>
-  </w:tblPr>
-  <w:tr>
-    <w:tc>
-      <w:tcPr>
-        <w:tcW w:w="9200" w:type="dxa"/>
-        <w:shd w:val="clear" w:color="auto" w:fill="F8FAFC"/>
-      </w:tcPr>
-      <w:p>
-        <w:pPr><w:spacing w:after="80"/></w:pPr>
-        <w:r>
-          <w:rPr><w:b/><w:color w:val="{self.primary_color}"/><w:sz w:val="24"/></w:rPr>
-          <w:t>{t_esc}</w:t>
-        </w:r>
-      </w:p>
-      <w:p>
-        <w:r>
-          <w:rPr><w:sz w:val="20"/><w:color w:val="334155"/></w:rPr>
-          <w:t>{b_esc}</w:t>
-        </w:r>
-      </w:p>
-    </w:tc>
-  </w:tr>
-</w:tbl>"""
-        insert_idx = min(3, len(self.paragraphs_xml))
-        self.paragraphs_xml.insert(insert_idx, xml)
-
     def build_bytes(self) -> bytes:
         body_content = "\n".join(self.paragraphs_xml)
         document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}">
+<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}" xmlns:wp="{WP_NS}">
   <w:body>
     {body_content}
     <w:sectPr>
@@ -430,7 +381,10 @@ class DocxBuilder:
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("[Content_Types].xml", CONTENT_TYPES_XML)
             zf.writestr("_rels/.rels", RELS_XML)
-            zf.writestr("word/_rels/document.xml.rels", DOC_RELS_XML)
+            image_rels = "".join(IMAGE_REL.format(n=i + 1, name=self.image_name(i)) for i in range(len(self.images)))
+            zf.writestr("word/_rels/document.xml.rels", DOC_RELS_XML.format(image_rels=image_rels))
+            for i, data in enumerate(self.images):
+                zf.writestr(f"word/media/{self.image_name(i)}", data)
             zf.writestr("word/styles.xml", styles_xml)
             zf.writestr("word/document.xml", document_xml)
             zf.writestr("docProps/core.xml", core_xml)
@@ -459,8 +413,8 @@ class DocxReader:
             "headings": [],
             "paragraphs": [],
             "tables": [],
-            "detected_fonts": set(),
-            "detected_colors": set(),
+            "detected_fonts": [],
+            "detected_colors": [],
             "word_count": 0
         }
         try:
@@ -470,8 +424,8 @@ class DocxReader:
                     styles_xml = zf.read("word/styles.xml").decode("utf-8", errors="ignore")
                     fonts = re.findall(r'w:ascii="([^"]+)"', styles_xml)
                     colors = re.findall(r'w:color w:val="([0-9A-Fa-f]{6})"', styles_xml)
-                    result["detected_fonts"].update(fonts)
-                    result["detected_colors"].update(colors)
+                    result["detected_fonts"].extend(fonts)
+                    result["detected_colors"].extend(colors)
 
                 # Document content
                 if "word/document.xml" in zf.namelist():
@@ -495,7 +449,7 @@ class DocxReader:
 
                     # Color search in document.xml
                     doc_colors = re.findall(r'w:color w:val="([0-9A-Fa-f]{6})"', doc_xml)
-                    result["detected_colors"].update(doc_colors)
+                    result["detected_colors"].extend(doc_colors)
 
                     result["paragraphs"] = text_parts
                     result["word_count"] = sum(len(p.split()) for p in text_parts)
@@ -511,6 +465,7 @@ class DocxReader:
         except Exception as e:
             result["error"] = str(e)
 
-        result["detected_fonts"] = list(result["detected_fonts"])
-        result["detected_colors"] = list(result["detected_colors"])
+        # Most frequent first, so the "primary" colour/font is the dominant one
+        result["detected_fonts"] = [v for v, _ in Counter(result["detected_fonts"]).most_common()]
+        result["detected_colors"] = [v for v, _ in Counter(result["detected_colors"]).most_common()]
         return result
