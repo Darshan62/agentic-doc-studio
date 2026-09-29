@@ -31,7 +31,7 @@ class WebSearchResult:
     id: str                            # citation id, e.g. "[Web-1]"
     title: str
     url: str
-    summary: str                       # Gemini's research summary shared by all sources of one search
+    summary: str                       # Research summary shared by all sources of one search
 
 
 @dataclass

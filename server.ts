@@ -277,7 +277,12 @@ async function startServer() {
 
   app.listen(PORT, HOST, () => {
     console.log(`Multi-Agent Doc/PPT server running on http://${HOST}:${PORT}`);
-    if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set: generation will fail.");
+    const provider = (process.env.AI_PROVIDER || "ollama").toLowerCase();
+    if (provider === "ollama") {
+      console.log(`AI provider: local Ollama at ${process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434"}`);
+    } else if (provider === "gemini" && !process.env.GEMINI_API_KEY) {
+      console.warn("AI_PROVIDER=gemini but GEMINI_API_KEY is not set: generation will fail.");
+    }
   });
 }
 

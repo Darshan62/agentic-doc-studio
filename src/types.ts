@@ -42,11 +42,23 @@ export interface SystemStatus {
   kb_documents: string[];
   versions_count: number;
   versions: VersionRecord[];
+  ai: {
+    provider: 'ollama' | 'gemini';
+    label: string;
+    status: 'ok' | 'missing' | 'invalid' | 'unreachable' | 'model_missing';
+    ready: boolean;
+    model: string;
+    vision_model: string;
+    base_url?: string;
+    installed_models?: string[];
+    web_search: boolean;
+  };
+  // Legacy fields retained by the API during migration.
   gemini_key_set: boolean;
-  gemini_key_status?: 'ok' | 'missing' | 'invalid' | 'unreachable';
+  gemini_key_status?: 'ok' | 'missing' | 'invalid' | 'unreachable' | null;
 }
 
-// ----- Content written by Gemini (same shape as agents/content_writer.py) -----
+// ----- AI-generated content (same shape as agents/content_writer.py) -----
 export interface DocSection {
   heading: string;
   paragraphs: string[];

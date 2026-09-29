@@ -78,10 +78,10 @@ export const ChatPanel: React.FC<{ ws: WorkspaceApi }> = ({ ws }) => {
           )}
         </div>
         <span
-          className={`text-[10px] px-2 py-0.5 rounded-full border ${ws.state?.parser === 'gemini' ? 'text-violet-300 border-violet-500/40 bg-violet-500/10' : 'text-slate-300 border-slate-600'}`}
+          className={`text-[10px] px-2 py-0.5 rounded-full border ${ws.state?.parser !== 'rules' ? 'text-violet-300 border-violet-500/40 bg-violet-500/10' : 'text-slate-300 border-slate-600'}`}
           title="Component that converts your message into a structured edit command"
         >
-          {ws.state?.parser === 'gemini' ? 'Gemini + rules fallback' : 'Built-in parser'}
+          {ws.state?.parser === 'ollama' ? 'Ollama + rules fallback' : ws.state?.parser === 'gemini' ? 'Gemini + rules fallback' : 'Built-in parser'}
         </span>
         <button
           onClick={ws.clear}

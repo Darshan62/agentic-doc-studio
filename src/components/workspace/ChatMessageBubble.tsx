@@ -96,7 +96,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message, o
             )}
             {message.parser && message.parser !== 'choice' && (
               <span title="Which component turned the request into an edit command">
-                parsed by {message.parser === 'gemini' ? 'Gemini' : 'built-in rules'}
+                parsed by {message.parser === 'ollama' ? 'Ollama' : message.parser === 'gemini' ? 'Gemini' : 'built-in rules'}
               </span>
             )}
             {message.commands && message.commands.length > 0 && (

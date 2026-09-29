@@ -19,6 +19,7 @@ from agents.rag_agent import EnterpriseRagAgent
 from agents.validator import ValidationAgent
 from agents.web_researcher import WebResearchAgent
 from core.citation_tracker import CitationTracker
+from core.llm_client import provider_label
 from core.models import DocumentStyle, PresentationStyle
 from core.vector_store import EnterpriseVectorStore
 from core.version_manager import VersionManager
@@ -108,7 +109,7 @@ class SupervisorAgent:
                       f"Retrieved {len(rag_chunks)} chunks from: " + ", ".join(docs_used))
 
         content = self.writer.write(prompt, doc_style.tone, web_results, rag_chunks)
-        self.log_step(self.writer.name, "Write content with Gemini",
+        self.log_step(self.writer.name, f"Write content with {provider_label()}",
                       f"{len(content['document']['sections'])} document sections, {len(content['deck']['slides'])} slides.")
 
         citations = citation_tracker.get_citations_list()

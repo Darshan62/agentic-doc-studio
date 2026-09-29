@@ -1,11 +1,11 @@
 """
 Edit Intent Parser Agent: natural language -> structured edit commands.
 
-Gemini only translates the request into JSON that follows core/edit_schema.py; it never sees
-or touches the file itself. Its answer is validated, and if Gemini is unavailable, slow, or
+The configured LLM only translates the request into JSON that follows core/edit_schema.py; it
+never sees or touches the file itself. Its answer is validated, and if the LLM is unavailable, slow, or
 returns anything invalid, the deterministic rule parser takes over.
 
-EDIT_PARSER=auto (default: Gemini, falling back to rules) | gemini | rules
+EDIT_PARSER=auto (default: configured LLM, falling back to rules) | llm | rules
 """
 import copy
 import json
@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 
 from agents.edit_rule_parser import ParseContext, ParseResult, parse_rules
 from core.edit_schema import ACTIONS, EditError, validate_command
-from core.gemini_client import GeminiError, ask_gemini_json
+from core.llm_client import LLMError, generate_json, provider_is_configured, provider_label, provider_name
 
 PARSE_TIMEOUT_SECONDS = 25
 HISTORY_TURNS = 4
@@ -79,13 +79,13 @@ def build_prompt(message: str, ctx: ParseContext) -> str:
 
 
 def check_commands(raw: Any, doc_type: str) -> List[Dict[str, Any]]:
-    """Structural check of Gemini's commands; the workspace validates again after resolving selections."""
+    """Structural check of LLM commands; the workspace validates again after resolving selections."""
     if not isinstance(raw, list) or len(raw) > MAX_COMMANDS:
-        raise EditError("Gemini returned an unexpected command list.")
+        raise EditError("The AI returned an unexpected command list.")
     commands = []
     for item in raw:
         if not isinstance(item, dict):
-            raise EditError("Gemini returned a malformed command.")
+            raise EditError("The AI returned a malformed command.")
         cmd = {k: v for k, v in item.items() if v is not None}
         if isinstance(cmd.get("target"), dict):
             cmd["target"] = {k: v for k, v in cmd["target"].items() if v is not None}
@@ -96,39 +96,41 @@ def check_commands(raw: Any, doc_type: str) -> List[Dict[str, Any]]:
     return commands
 
 
-def parse_with_gemini(message: str, ctx: ParseContext) -> ParseResult:
-    answer = ask_gemini_json(build_prompt(message, ctx), timeout=PARSE_TIMEOUT_SECONDS, fast=True)
+def parse_with_llm(message: str, ctx: ParseContext) -> ParseResult:
+    answer = generate_json(build_prompt(message, ctx), timeout=PARSE_TIMEOUT_SECONDS, fast=True)
+    label = provider_label()
+    parser = provider_name()
     if not isinstance(answer, dict):
-        raise EditError("Gemini returned an unexpected answer.")
+        raise EditError(f"{label} returned an unexpected answer.")
     commands = check_commands(answer.get("commands") or [], ctx.doc_type)
     question = answer.get("clarification")
     if not commands:
         if not isinstance(question, str) or not question.strip():
-            raise EditError("Gemini returned neither commands nor a question.")
-        return ParseResult([], clarification=question.strip()[:500], parser="gemini")
-    return ParseResult(commands, parser="gemini")
+            raise EditError(f"{label} returned neither commands nor a question.")
+        return ParseResult([], clarification=question.strip()[:500], parser=parser)
+    return ParseResult(commands, parser=parser)
 
 
 def parse_edit_request(message: str, ctx: ParseContext) -> ParseResult:
     mode = os.environ.get("EDIT_PARSER", "auto").strip().lower()
-    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
-    if mode == "rules" or not has_key:
+    if mode == "rules" or not provider_is_configured():
         result = parse_rules(message, ctx)
         if mode != "rules":
-            result.note = "Gemini is not configured, so the built-in parser handled this request."
+            result.note = f"{provider_label()} is not configured, so the built-in parser handled this request."
         return result
     try:
-        result = parse_with_gemini(message, ctx)
-    except (GeminiError, EditError, ValueError, KeyError, TypeError) as e:
-        if mode == "gemini":
-            return ParseResult([], clarification=f"Gemini could not interpret that request ({e}).", parser="gemini")
+        result = parse_with_llm(message, ctx)
+    except (LLMError, EditError, ValueError, KeyError, TypeError) as e:
+        if mode in ("llm", "gemini"):
+            return ParseResult([], clarification=f"{provider_label()} could not interpret that request ({e}).",
+                               parser=provider_name())
         fallback = parse_rules(message, ctx)
-        fallback.note = f"Gemini was unavailable or returned an invalid command ({e}); the built-in parser was used."
+        fallback.note = f"{provider_label()} was unavailable or returned an invalid command ({e}); the built-in parser was used."
         return fallback
     if result.clarification and mode == "auto":
         # The rule parser never guesses, so if it is certain we can act instead of asking
         rules = parse_rules(message, ctx)
         if rules.commands:
-            rules.note = "Gemini asked for clarification, but the request matched a known pattern exactly."
+            rules.note = f"{provider_label()} asked for clarification, but the request matched a known pattern exactly."
             return rules
     return result

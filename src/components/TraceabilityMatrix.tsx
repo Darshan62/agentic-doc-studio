@@ -36,7 +36,7 @@ export const TraceabilityMatrix: React.FC<TraceabilityMatrixProps> = ({ citation
         <h2 className="text-sm font-bold text-white uppercase tracking-wider">Sources & Where They Are Cited ({citations.length})</h2>
       </div>
       <p className="text-xs text-slate-400">
-        Web sources come from Gemini's Google Search. Knowledge sources are chunks retrieved from the sample files and your uploads.
+        When Gemini web research is enabled, web sources come from Google Search. Knowledge sources are local chunks retrieved from the sample files and your uploads.
       </p>
 
       <div className="space-y-3">

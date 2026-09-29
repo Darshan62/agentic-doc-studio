@@ -13,11 +13,30 @@ import { EditorWorkspace } from './components/workspace/EditorWorkspace';
 import { postJson, errorMessage } from './api';
 import { AgentStep, EditResult, OrchestrationResult, SystemStatus } from './types';
 
-const KEY_PROBLEMS: Record<string, string> = {
-  missing: 'GEMINI_API_KEY is not set.',
-  invalid: 'Google rejected GEMINI_API_KEY (invalid, expired, or not a Gemini API key).',
-  unreachable: 'Gemini could not be reached (network problem or Google outage).',
-};
+function aiProblem(status: SystemStatus): { title: string; help: React.ReactNode } | null {
+  if (status.ai.ready) return null;
+  if (status.ai.provider === 'ollama') {
+    if (status.ai.status === 'model_missing') {
+      return {
+        title: 'Ollama is running, but the configured models are not installed.',
+        help: <>Run <code>ollama pull {status.ai.model}</code> and <code>ollama pull {status.ai.vision_model}</code>, then refresh.</>,
+      };
+    }
+    return {
+      title: `Ollama could not be reached at ${status.ai.base_url || 'http://127.0.0.1:11434'}.`,
+      help: <>Start the local service with <code>ollama serve</code>, then refresh. No API key is required.</>,
+    };
+  }
+  const titles: Record<string, string> = {
+    missing: 'GEMINI_API_KEY is not set.',
+    invalid: 'Google rejected GEMINI_API_KEY (invalid, expired, or not a Gemini API key).',
+    unreachable: 'Gemini could not be reached (network problem or Google outage).',
+  };
+  return {
+    title: titles[status.ai.status] || 'Gemini is not ready.',
+    help: <>Create a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">Google AI Studio</a>, set <code>GEMINI_API_KEY</code>, and restart the app.</>,
+  };
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('workspace');
@@ -27,6 +46,7 @@ export default function App() {
   const [lastResult, setLastResult] = useState<OrchestrationResult | null>(null);
   const [activeSteps, setActiveSteps] = useState<AgentStep[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const providerProblem = status ? aiProblem(status) : null;
 
   const fetchStatus = async () => {
     try {
@@ -110,15 +130,10 @@ export default function App() {
 
       {activeTab !== 'workspace' && (
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {status && status.gemini_key_status !== 'ok' && (
+        {providerProblem && (
           <div role="status" className="bg-amber-950/60 border border-amber-700 text-amber-200 text-sm rounded-xl p-4 space-y-1">
-            <p className="font-semibold">{KEY_PROBLEMS[status.gemini_key_status ?? 'missing']}</p>
-            <p>
-              Generation, web research and image OCR need Gemini. Create a key at{' '}
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com/apikey</a>,
-              set <code>GEMINI_API_KEY</code> in <code>.env</code> and restart <code>npm run dev</code>.
-              The AI Editor Workspace keeps working with its built-in parser.
-            </p>
+            <p className="font-semibold">{providerProblem.title}</p>
+            <p>{providerProblem.help} The built-in editor parser remains available.</p>
           </div>
         )}
 
@@ -161,7 +176,7 @@ export default function App() {
 
       {activeTab !== 'workspace' && (
         <footer className="border-t border-slate-800/80 bg-slate-900/60 py-4 text-center text-xs text-slate-500">
-          Multi-agent document and presentation generator • Gemini + Google Search + local RAG
+          Multi-agent document and presentation generator • {status?.ai.label || 'Local/optional cloud AI'} + local RAG
         </footer>
       )}
     </div>

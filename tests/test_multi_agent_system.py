@@ -153,10 +153,11 @@ class TestIngestion(TempFolderTest):
             IngestionAgent(self.store).ingest("script.exe")
 
 
-@mock.patch("agents.web_researcher.ask_gemini", side_effect=fake_web_search)
+@mock.patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-key"})
+@mock.patch("agents.web_researcher.generate_text", side_effect=fake_web_search)
 class TestPipeline(TempFolderTest):
     def run_generation(self, supervisor: SupervisorAgent) -> dict:
-        with mock.patch("agents.content_writer.ask_gemini_json", return_value=make_content()):
+        with mock.patch("agents.content_writer.generate_json", return_value=make_content()):
             return supervisor.process_request("Proposal on solar energy", DOC_TEMPLATE, PPT_TEMPLATE)
 
     def test_generation_builds_valid_files_with_citations(self, _search):
@@ -175,7 +176,7 @@ class TestPipeline(TempFolderTest):
 
         # A new SupervisorAgent mimics the next API call (new Python process)
         revised = {"content": make_content("Revised Title"), "changes": ["Renamed the title"]}
-        with mock.patch("agents.content_writer.ask_gemini_json", return_value=revised):
+        with mock.patch("agents.content_writer.generate_json", return_value=revised):
             result = SupervisorAgent("test.db").handle_conversational_edit("Rename the title")
 
         self.assertEqual(result["version"], "v1.1")
@@ -240,7 +241,7 @@ class TestGeminiClient(unittest.TestCase):
             png = f.read()
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp.write(png)
-        with mock.patch("core.ocr_vision.ask_gemini", return_value=("Diagram text", [])) as ask:
+        with mock.patch("core.ocr_vision.generate_text", return_value=("Diagram text", [])) as ask:
             self.assertEqual(read_image_text(tmp.name), "Diagram text")
         self.assertEqual(ask.call_args.kwargs["image_mime"], "image/png")
         os.remove(tmp.name)

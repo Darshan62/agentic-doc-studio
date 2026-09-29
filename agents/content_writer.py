@@ -1,12 +1,12 @@
 """
 Content Writer Agent
-Asks Gemini to write the proposal and the slide deck as JSON, grounded in web research
+Asks the configured LLM to write the proposal and slide deck as JSON, grounded in web research
 and retrieved knowledge chunks. The DOCX/PPTX generators then turn that JSON into files.
 """
 import json
 from typing import Any, Dict, List, Tuple
 
-from core.gemini_client import GeminiError, ask_gemini_json
+from core.llm_client import LLMError, generate_json
 from core.models import RAGChunk, WebSearchResult
 
 CONTENT_SLIDES = 10  # + title slide + sources slide = 12 slides
@@ -59,7 +59,7 @@ class ContentWriterAgent:
             f"{format_sources(web_results, rag_chunks)}\n\n"
             f"{CONTENT_FORMAT}"
         )
-        content = ask_gemini_json(prompt)
+        content = generate_json(prompt)
         check_content(content)
         return content
 
@@ -71,11 +71,11 @@ class ContentWriterAgent:
             "Change only what the request asks for and keep existing citations.\n"
             'Return JSON: {"content": <the full updated JSON in the same shape>, "changes": [short description of each change]}'
         )
-        answer = ask_gemini_json(prompt)
+        answer = generate_json(prompt)
         check_content(answer.get("content", {}))
         return answer["content"], answer.get("changes", [])
 
 
 def check_content(content: Dict[str, Any]) -> None:
     if not content.get("document", {}).get("sections") or not content.get("deck", {}).get("slides"):
-        raise GeminiError("Gemini's answer was missing the document sections or the slides.")
+        raise LLMError("The AI answer was missing the document sections or the slides.")

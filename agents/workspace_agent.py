@@ -18,6 +18,7 @@ from agents.edit_rule_parser import ParseContext
 from agents.edit_rules_vocab import ORDINALS
 from agents.workspace_edit import apply_commands, build_preview, outline, validate_selection
 from core.edit_schema import ClarificationNeeded, EditError
+from core.llm_client import provider_is_configured, provider_name
 from core.ooxml_package import PackageError, image_info
 from core.version_manager import VersionManager
 
@@ -53,7 +54,7 @@ class WorkspaceAgent:
         active = self.state["active"]
         result: Dict[str, Any] = {"messages": self.state["messages"], "active": None, "preview": None, "versions": [],
                                   "pending_image": self.state["pending_image"],
-                                  "parser": "gemini" if os.environ.get("GEMINI_API_KEY", "").strip()
+                                  "parser": provider_name() if provider_is_configured()
                                   and os.environ.get("EDIT_PARSER", "auto") != "rules" else "rules"}
         if not active:
             return result

@@ -21,7 +21,7 @@ The default **AI Editor Workspace** tab is a split screen: chat on the left, a l
 deterministic OpenXML editor applies to the real file. The model never writes code or XML.
 
 ```
-message → Edit Intent Parser (Gemini, JSON only; built-in rule parser as fallback)
+message → Edit Intent Parser (configured LLM, JSON only; built-in rule parser as fallback)
         → core/edit_schema.py validate_command (whitelisted actions / targets / values)
         → core/docx_editor.py or core/pptx_editor.py (targeted in-place XML edits)
         → saved working copy + version snapshot (v1.0, v1.1, …) → preview JSON → chat reply
@@ -39,9 +39,33 @@ message → Edit Intent Parser (Gemini, JSON only; built-in rule parser as fallb
 - Every successful edit is a new version. Undo/redo and the version menu restore earlier versions.
 - The original file is never modified: the workspace edits a copy in `output/workspace/`.
 - Demo files: `python -m templates_and_samples.create_demo_files` rebuilds `templates_and_samples/demo/`.
-- `EDIT_PARSER=auto|gemini|rules` (default `auto`: Gemini first, rule parser on any Gemini failure).
+- `EDIT_PARSER=auto|llm|rules` (default `auto`: configured LLM first, rule parser on any LLM failure).
 - Run: `npm install`, `pip install -r requirements.txt`, `npm run dev`, then open http://127.0.0.1:3000.
 - Tests: `python -m unittest tests.test_multi_agent_system tests.test_edit_engine tests.test_edit_operations tests.test_editor_workspace`.
+
+---
+
+## Local AI with Ollama (default)
+
+The application runs document generation, structured editing, and image OCR locally through Ollama. For the recommended 16 GB RAM / 4 GB VRAM configuration:
+
+```env
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:14b
+OLLAMA_VISION_MODEL=qwen3-vl:8b
+OLLAMA_NUM_CTX=8192
+```
+
+Install the models once, then generation works without internet:
+
+```powershell
+ollama pull qwen3:14b
+ollama pull qwen3-vl:8b
+npm run dev
+```
+
+Google Search grounding is intentionally skipped in local mode; uploaded files and local RAG remain available. To use the optional cloud provider and Google Search, set `AI_PROVIDER=gemini` and `GEMINI_API_KEY` in `.env`. See `.env.example` for all settings.
 
 ---
 

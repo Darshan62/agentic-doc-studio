@@ -142,7 +142,7 @@ export interface WorkspaceState {
   preview: PreviewModel | null;
   versions: VersionEntry[];
   pending_image: { name: string; width: number; height: number } | null;
-  parser: 'gemini' | 'rules';
+  parser: 'ollama' | 'gemini' | 'rules';
 }
 
 export interface ArtifactFile {

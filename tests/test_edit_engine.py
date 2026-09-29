@@ -13,6 +13,7 @@ from agents.edit_intent_parser import parse_edit_request
 from agents.edit_rule_parser import ParseContext, parse_rules
 from core.edit_schema import EditError, validate_command
 from core.gemini_client import GeminiError, ask_gemini, ask_gemini_json, check_api_key, describe_http_error, parse_json_answer
+from core.llm_client import LLMError
 
 
 def rules(message: str, doc_type: str = "docx", **ctx) -> dict:
@@ -116,12 +117,13 @@ class RuleParserTests(unittest.TestCase):
 
 class GeminiParserTests(unittest.TestCase):
     def setUp(self):
-        patcher = mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "EDIT_PARSER": "auto"})
+        patcher = mock.patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-key",
+                                               "EDIT_PARSER": "auto"})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.ctx = ParseContext(doc_type="docx", outline="¶1 [title] Acme")
 
-    @mock.patch("agents.edit_intent_parser.ask_gemini_json")
+    @mock.patch("agents.edit_intent_parser.generate_json")
     def test_valid_gemini_command_is_used(self, ask):
         ask.return_value = {"commands": [{"action": "update_style", "target": {"type": "title", "slide": None},
                                           "changes": {"italic": True, "bold": None}}], "clarification": None}
@@ -129,7 +131,7 @@ class GeminiParserTests(unittest.TestCase):
         self.assertEqual(result.parser, "gemini")
         self.assertEqual(result.commands, [{"action": "update_style", "target": {"type": "title"}, "changes": {"italic": True}}])
 
-    @mock.patch("agents.edit_intent_parser.ask_gemini_json")
+    @mock.patch("agents.edit_intent_parser.generate_json")
     def test_invalid_gemini_command_falls_back_to_rules(self, ask):
         ask.return_value = {"commands": [{"action": "run_python", "code": "import os"}]}
         result = parse_edit_request("Change the title color to blue.", self.ctx)
@@ -137,13 +139,13 @@ class GeminiParserTests(unittest.TestCase):
         self.assertEqual(result.commands[0]["changes"], {"color": "blue"})
         self.assertIn("built-in parser", result.note or "")
 
-    @mock.patch("agents.edit_intent_parser.ask_gemini_json", side_effect=GeminiError("HTTP 503"))
+    @mock.patch("agents.edit_intent_parser.generate_json", side_effect=LLMError("HTTP 503"))
     def test_gemini_outage_falls_back_to_rules(self, _ask):
         result = parse_edit_request("Remove the paragraph about pricing", self.ctx)
         self.assertEqual(result.parser, "rules")
         self.assertEqual(result.commands[0]["action"], "delete_paragraph")
 
-    @mock.patch("agents.edit_intent_parser.ask_gemini_json")
+    @mock.patch("agents.edit_intent_parser.generate_json")
     def test_gemini_clarification_is_passed_on(self, ask):
         ask.return_value = {"commands": [], "clarification": "Which paragraph do you mean?"}
         result = parse_edit_request("tidy up that bit", self.ctx)
@@ -182,7 +184,8 @@ class GeminiErrorMessageTests(unittest.TestCase):
         from agents.web_researcher import WebResearchAgent
         from core.citation_tracker import CitationTracker
         agent = WebResearchAgent()
-        with mock.patch("agents.web_researcher.ask_gemini", side_effect=GeminiError("quota (HTTP 429)")):
+        with mock.patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test-key"}), \
+                mock.patch("agents.web_researcher.generate_text", side_effect=LLMError("quota (HTTP 429)")):
             self.assertEqual(agent.research("topic", CitationTracker()), [])
         self.assertIn("429", agent.unavailable_reason)
 
