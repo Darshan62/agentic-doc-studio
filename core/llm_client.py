@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_OLLAMA_MODEL = "qwen3:14b"
+DEFAULT_OLLAMA_MODEL = "qwen3:4b"
 DEFAULT_OLLAMA_VISION_MODEL = "qwen3-vl:8b"
 DEFAULT_CONTEXT_SIZE = 8192
 TIMEOUT_SECONDS = 300
@@ -68,6 +68,19 @@ def _ollama_context_size() -> int:
     return value
 
 
+def _ollama_predict_limit(fast: bool) -> int:
+    if fast:
+        return 1024
+    raw = os.environ.get("OLLAMA_NUM_PREDICT", "4096").strip()
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise LLMError(f"OLLAMA_NUM_PREDICT must be an integer, not {raw!r}.") from e
+    if value < 256:
+        raise LLMError("OLLAMA_NUM_PREDICT must be at least 256.")
+    return value
+
+
 def _read_http_error(e: urllib.error.HTTPError) -> str:
     try:
         data = json.loads(e.read() or b"{}")
@@ -121,21 +134,49 @@ def _ask_ollama(prompt: str, want_json: bool = False,
     body: Dict[str, Any] = {
         "model": model,
         "messages": [message],
-        "stream": False,
+        # Streaming prevents a healthy long generation from hitting one whole-response
+        # timeout. The public API still returns one assembled string to callers.
+        "stream": True,
         "think": False,
         "keep_alive": os.environ.get("OLLAMA_KEEP_ALIVE", "5m"),
         "options": {
             "num_ctx": _ollama_context_size(),
+            "num_predict": _ollama_predict_limit(fast),
             "temperature": 0 if want_json or fast else 0.2,
         },
     }
     if want_json:
         body["format"] = "json"
+    request = urllib.request.Request(
+        f"{_ollama_base_url()}/api/chat",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    chunks: List[str] = []
     try:
-        data = _ollama_request("/api/chat", body, timeout)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            for raw_line in response:
+                if not raw_line.strip():
+                    continue
+                data = json.loads(raw_line)
+                if data.get("error"):
+                    raise LLMError(f"Ollama request failed: {data['error']}")
+                chunks.append(str((data.get("message") or {}).get("content") or ""))
     except urllib.error.HTTPError as e:
         raise _ollama_error(e, model) from e
-    text = str((data.get("message") or {}).get("content") or "").strip()
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        raise LLMError(
+            f"Could not reach Ollama at {_ollama_base_url()} ({reason}). Start it with 'ollama serve'."
+        ) from e
+    except (TimeoutError, socket.timeout) as e:
+        raise LLMError(
+            f"Ollama produced no data for {timeout} seconds while using '{model}'."
+        ) from e
+    except json.JSONDecodeError as e:
+        raise LLMError("Ollama returned an unreadable streaming response.") from e
+    text = "".join(chunks).strip()
     if not text:
         raise LLMError(f"Ollama model '{model}' returned an empty answer.")
     return text

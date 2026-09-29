@@ -52,20 +52,23 @@ The application runs document generation, structured editing, and image OCR loca
 ```env
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3:14b
+OLLAMA_MODEL=qwen3:4b
 OLLAMA_VISION_MODEL=qwen3-vl:8b
 OLLAMA_NUM_CTX=8192
+OLLAMA_NUM_PREDICT=4096
 ```
 
 Install the models once, then generation works without internet:
 
 ```powershell
-ollama pull qwen3:14b
+ollama pull qwen3:4b
 ollama pull qwen3-vl:8b
 npm run dev
 ```
 
 Google Search grounding is intentionally skipped in local mode; uploaded files and local RAG remain available. To use the optional cloud provider and Google Search, set `AI_PROVIDER=gemini` and `GEMINI_API_KEY` in `.env`. See `.env.example` for all settings.
+
+`qwen3:14b` fits in system memory but is not recommended on a 4 GB GPU: most layers run on the CPU, so a document-sized JSON response can take longer than five minutes. Ollama responses are consumed as a stream, while `OLLAMA_NUM_PREDICT` bounds unusually long output.
 
 ---
 

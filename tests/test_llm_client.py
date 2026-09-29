@@ -37,7 +37,15 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/chat")
         self.assertEqual(sent["model"], "qwen3:14b")
         self.assertEqual(sent["options"]["num_ctx"], 8192)
-        self.assertFalse(sent["stream"])
+        self.assertTrue(sent["stream"])
+
+    def test_streamed_chunks_are_assembled(self):
+        streamed = io.BytesIO(
+            b'{"message":{"content":"hel"},"done":false}\n'
+            b'{"message":{"content":"lo"},"done":true}\n'
+        )
+        with mock.patch("urllib.request.urlopen", return_value=streamed):
+            self.assertEqual(generate_text("Hi"), ("hello", []))
 
     def test_json_request_enables_structured_output(self):
         with mock.patch("urllib.request.urlopen", return_value=response({"message": {"content": '{"answer": 7}'}})) as open_url:
