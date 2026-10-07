@@ -2,6 +2,8 @@
 
 **Repository:** `agentic-doc-studio`
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A local-first AI workspace for generating, analyzing, and conversationally editing editable Microsoft Word (`.docx`) and PowerPoint (`.pptx`) files. The project combines a React interface, an Express API, a sequential Python agent pipeline, retrieval-augmented generation, and deterministic OpenXML editing.
 
 > **Project status:** functional MVP/academic proof of concept. It is intended for local evaluation and portfolio demonstration, not production or untrusted multi-user deployment. See [Project Status](docs/PROJECT_STATUS.md) for the audited readiness assessment.
@@ -20,16 +22,42 @@ A local-first AI workspace for generating, analyzing, and conversationally editi
 ## Architecture
 
 ```mermaid
-flowchart LR
-    UI[React + Vite UI] --> API[Express API]
-    API -->|child process| Bridge[Python bridge]
-    Bridge --> Supervisor[Sequential supervisor]
-    Supervisor --> Agents[Analysis, research, RAG, writing, generation, validation]
-    Agents --> Files[Editable DOCX and PPTX]
-    UI --> Editor[Conversational editor]
-    Editor --> Schema[Validated edit commands]
-    Schema --> OpenXML[Deterministic OpenXML edits]
-    OpenXML --> Versions[Working copy + version history]
+flowchart TB
+    User([User]) --> UI[React 19 + Vite UI]
+
+    subgraph Node[Local Node.js Process]
+        API[Express API<br/>127.0.0.1:3000]
+        Bridge[Python subprocess bridge<br/>run_pipeline.py]
+    end
+
+    subgraph Python[Python Application]
+        Supervisor[Sequential Supervisor]
+        Workspace[Workspace Agent]
+        Pipeline[Analysis → Context → Writing → Generation → Validation]
+        EditFlow[Intent parsing → Schema validation → OpenXML editing]
+    end
+
+    subgraph Intelligence[AI and Knowledge]
+        Ollama[Ollama<br/>default local provider]
+        Gemini[Gemini<br/>optional cloud provider]
+        RAG[(SQLite knowledge store<br/>hashed n-gram retrieval)]
+    end
+
+    subgraph Artifacts[Local Artifacts]
+        Office[Editable DOCX + PPTX]
+        History[Workspace copies + version snapshots]
+    end
+
+    UI --> API --> Bridge
+    Bridge --> Supervisor --> Pipeline --> Office
+    Bridge --> Workspace --> EditFlow --> History
+    Pipeline --> Ollama
+    Pipeline -. optional .-> Gemini
+    Pipeline --> RAG
+    EditFlow --> Ollama
+    EditFlow -. optional .-> Gemini
+    History --> UI
+    Office --> UI
 ```
 
 The generation workflow is a sequential, modular multi-agent pipeline rather than a distributed autonomous-agent system. The TypeScript server starts `run_pipeline.py` for backend operations. Generation requests pass through the supervisor; workspace edits use a dedicated editor path.
@@ -51,6 +79,35 @@ The supervisor coordinates a fixed sequence of focused Python modules. These mod
 | Utilities | Conversion Agent | Converts generated content between DOCX and PPTX representations |
 | Editing | Workspace Agent, intent parsers, OpenXML editors | Resolves conversational requests into validated, targeted edits with version history |
 
+### Generation Sequence
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as React UI
+    participant API as Express API
+    participant S as Supervisor
+    participant A as Template Analyzers
+    participant W as Web Research
+    participant R as Local RAG
+    participant C as Content Writer
+    participant G as DOCX/PPTX Generators
+    participant V as Validator
+
+    User->>UI: Submit prompt, templates, and optional sources
+    UI->>API: POST /api/orchestrate
+    API->>S: Spawn Python pipeline
+    S->>A: Extract DOCX and PPTX styles
+    S->>W: Request grounded research
+    Note over W: Runs only when Gemini is configured
+    S->>R: Retrieve relevant local chunks
+    S->>C: Combine prompt, styles, web results, and RAG context
+    C-->>S: Structured document and slide content
+    S->>G: Build native OpenXML packages
+    G->>V: Validate files, styling, and citations
+    V-->>UI: Results, artifacts, traceability, and execution steps
+```
+
 ## Current Capabilities
 
 | Area | Implemented behavior |
@@ -65,6 +122,25 @@ The supervisor coordinates a fixed sequence of focused Python modules. These mod
 | Conversion | DOCX to PPTX and PPTX to DOCX |
 
 The local retrieval implementation is intentionally lightweight and is not equivalent to a production semantic-embedding/vector-database stack.
+
+### Conversational Editing Flow
+
+```mermaid
+flowchart LR
+    Request[Plain-language edit] --> Parser[Configured LLM parser]
+    Selection[Selected paragraph,<br/>shape, slide, or image] --> Parser
+    Parser -->|LLM unavailable or invalid| Rules[Built-in rule parser]
+    Parser --> Command[Structured edit command]
+    Rules --> Command
+    Command --> Schema{Allowed action,<br/>target, and values?}
+    Schema -->|Ambiguous| Clarify[Clarifying question]
+    Clarify --> Request
+    Schema -->|Valid DOCX| Docx[DOCX OpenXML editor]
+    Schema -->|Valid PPTX| Pptx[PPTX OpenXML editor]
+    Docx --> Snapshot[Save working copy + version]
+    Pptx --> Snapshot
+    Snapshot --> Preview[Refresh preview and enable undo/redo]
+```
 
 ## Technology Stack
 
@@ -235,4 +311,4 @@ Keep the service bound to localhost and use only trusted files. Review [Security
 
 ## License
 
-No license file is currently included. Add an explicit license before distributing or accepting external contributions.
+Licensed under the [MIT License](LICENSE).
