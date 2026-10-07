@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Presentation, Redo2, Undo2, ZoomIn, ZoomOut,
+  ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Palette, Presentation, Redo2, Undo2, ZoomIn, ZoomOut,
 } from 'lucide-react';
 
 import { WorkspaceApi } from '../../workspace/useWorkspace';
@@ -54,6 +54,15 @@ export const PreviewPanel: React.FC<{ ws: WorkspaceApi }> = ({ ws }) => {
   const zoom = ZOOM_STEPS[zoomIndex];
   const isPptx = preview.type === 'pptx';
   const slideCount = preview.type === 'pptx' ? preview.slides.length : 0;
+  const pptxPreview = preview.type === 'pptx' ? preview : null;
+  const currentSlideModel = pptxPreview
+    ? pptxPreview.slides[Math.min(ws.currentSlide, pptxPreview.slides.length) - 1]
+    : null;
+  const backgroundShape = currentSlideModel?.shapes.find((shape) =>
+    shape.name.trim().toLowerCase() === 'background'
+    || (shape.x === 0 && shape.y === 0 && shape.cx >= pptxPreview!.width * 0.98 && shape.cy >= pptxPreview!.height * 0.98));
+  const slideBackground = backgroundShape?.fill ?? currentSlideModel?.background ?? null;
+  const backgroundPickerValue = slideBackground && /^#[0-9a-f]{6}$/i.test(slideBackground) ? slideBackground : '#ffffff';
   const TypeIcon = isPptx ? Presentation : FileText;
 
   return (
@@ -95,6 +104,20 @@ export const PreviewPanel: React.FC<{ ws: WorkspaceApi }> = ({ ws }) => {
           {isPptx && (
             <>
               <span className="w-px h-5 bg-slate-700 mx-1" />
+              <label
+                className="inline-flex items-center gap-1.5 px-1.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
+                title={`Change slide ${ws.currentSlide} background colour`}
+              >
+                <Palette className="w-4 h-4" aria-hidden />
+                <input
+                  type="color"
+                  value={backgroundPickerValue}
+                  onChange={(e) => ws.send(`Change the background color of slide ${ws.currentSlide} to ${e.target.value}.`)}
+                  disabled={busy}
+                  aria-label={`Background colour for slide ${ws.currentSlide}`}
+                  className="w-5 h-5 p-0 border-0 rounded bg-transparent cursor-pointer disabled:cursor-not-allowed"
+                />
+              </label>
               <ToolButton label="Previous slide" onClick={() => ws.setCurrentSlide(ws.currentSlide - 1)} disabled={ws.currentSlide <= 1}>
                 <ChevronLeft className="w-4 h-4" />
               </ToolButton>

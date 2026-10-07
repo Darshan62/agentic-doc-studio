@@ -73,6 +73,8 @@ def resolve_command(raw: Dict[str, Any], doc_type: str, selection: Optional[Dict
     target = cmd.get("target")
     if doc_type == "pptx" and isinstance(target, dict) and not target.get("slide"):
         needs_slide = target.get("type") in SLIDE_SCOPED_TARGETS or (target.get("type") == "paragraph" and target.get("index"))
+        if cmd.get("action") == "update_background" and target.get("type") == "slide":
+            needs_slide = True
         if needs_slide or (cmd.get("action") == "add_text" and target.get("type") == "slide"):
             target["slide"] = current_slide
     if doc_type == "pptx" and cmd.get("action") == "add_text" and not target:

@@ -13,7 +13,7 @@ from core.docx_model import W, DocxDocument, paragraph_text
 from core.edit_schema import ClarificationNeeded, EditError, validate_command
 from core.ooxml_package import OoxmlPackage, PackageError, image_info
 from core.pptx_editor import PptxEditor
-from core.pptx_model import A, PptxDocument, shape_text, text_of
+from core.pptx_model import A, P, PptxDocument, shape_text, text_of
 from templates_and_samples.create_demo_files import acme_logo, build_docx, build_pptx, nova_logo
 
 
@@ -123,6 +123,26 @@ class PptxOperationTests(unittest.TestCase):
         latin = {r.get("typeface") for n in range(1, 6)
                  for r in self.pkg.xml(PptxDocument(self.pkg).slide_part(n)).iter(A + "latin")}
         self.assertEqual(latin, {"Georgia"})
+
+    def test_background_color_updates_native_background_and_full_slide_shape(self):
+        outcome = self.apply({"action": "update_background", "target": {"type": "slide", "slide": 2},
+                              "color": "navy"})
+        doc = PptxDocument(self.pkg)
+        root = self.pkg.xml(doc.slide_part(2))
+        native = root.find(f"{P}cSld/{P}bg/{P}bgPr/{A}solidFill/{A}srgbClr")
+        background_shape = next(shape for shape in doc.shapes(2) if shape.name == "Background")
+        shape_fill = background_shape.el.find(f"{P}spPr/{A}solidFill/{A}srgbClr")
+        self.assertEqual(native.get("val"), "1F3864")
+        self.assertEqual(shape_fill.get("val"), "1F3864")
+        self.assertEqual(outcome.slides, [2])
+
+        all_outcome = self.apply({"action": "update_background", "target": {"type": "document"},
+                                  "color": "#FFFFFF"})
+        self.assertEqual(all_outcome.slides, [1, 2, 3, 4, 5])
+        for number in all_outcome.slides:
+            color = self.pkg.xml(PptxDocument(self.pkg).slide_part(number)).find(
+                f"{P}cSld/{P}bg/{P}bgPr/{A}solidFill/{A}srgbClr")
+            self.assertEqual(color.get("val"), "FFFFFF")
 
     def test_add_bullet_after_first_and_delete_by_text(self):
         self.apply({"action": "add_text", "target": {"type": "slide", "slide": 5}, "text": "Inserted second",

@@ -12,6 +12,7 @@ import { ConverterPanel } from './components/ConverterPanel';
 import { EditorWorkspace } from './components/workspace/EditorWorkspace';
 import { postJson, errorMessage } from './api';
 import { AgentStep, EditResult, OrchestrationResult, SystemStatus } from './types';
+import { WorkspaceResponse } from './workspace/types';
 
 function aiProblem(status: SystemStatus): { title: string; help: React.ReactNode } | null {
   if (status.ai.ready) return null;
@@ -72,6 +73,13 @@ export default function App() {
     setTimeout(() => setDownloadingZip(false), 1500);
   };
 
+  const openPresentationInWorkspace = async (path: string) => {
+    await postJson<WorkspaceResponse>('/api/workspace/open', { path });
+    // EditorWorkspace mounts after the file is open, so its initial state request
+    // immediately receives the real themed PPT preview rather than a JSON summary.
+    setActiveTab('workspace');
+  };
+
   const handleRunOrchestration = async (prompt: string, docTpl: string, pptTpl: string, focusDocs: string[]) => {
     setIsProcessing(true);
     setError(null);
@@ -84,6 +92,12 @@ export default function App() {
       });
       setLastResult(data);
       setActiveSteps(data.execution_steps);
+      try {
+        await openPresentationInWorkspace(data.generated_pptx);
+      } catch (workspaceErr) {
+        setError(`The files were generated, but the presentation could not be opened in the AI Editor Workspace: ${errorMessage(workspaceErr)}`);
+        setActiveTab('artifacts');
+      }
       await fetchStatus();
     } catch (err) {
       setError(errorMessage(err));
@@ -108,6 +122,12 @@ export default function App() {
       setActiveSteps((prev) => [...prev, newStep]);
       // Keep the preview in sync with the edited files
       setLastResult((prev) => (prev ? { ...prev, content: data.content } : prev));
+      try {
+        await openPresentationInWorkspace(data.artifacts.pptx);
+      } catch (workspaceErr) {
+        setError(`The edit was saved, but the presentation could not be opened in the AI Editor Workspace: ${errorMessage(workspaceErr)}`);
+        setActiveTab('artifacts');
+      }
       await fetchStatus();
     } catch (err) {
       setError(errorMessage(err));

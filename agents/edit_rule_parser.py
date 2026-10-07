@@ -63,6 +63,8 @@ def merge_styles(commands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def parse_clause(c: Clause) -> Optional[Dict[str, Any]]:
     removal = c.has(r"\b(remove|delete|drop|erase|get rid of|take out|cut)\b")
+    if c.has(r"\b(?:slide\s+)?backgrounds?(?:\s+colou?r)?\b|\bbackground\s+of\s+(?:the\s+)?(?:slide|presentation|deck)\b"):
+        return background_command(c)
     if c.has(r"\b(logo|image|picture|photo|graphic)\b") or (c.has(r"\b(it|its)\b") and (c.prev_target or {}).get("type") in ("logo", "image")):
         return image_command(c, removal)
     if removal and c.pptx and c.has(r"\bslide\b") and not c.has(r"\b(bullet|text|title|line|paragraph|point|word|sentence)\b"):
@@ -77,6 +79,21 @@ def parse_clause(c: Clause) -> Optional[Dict[str, Any]]:
     if c.has(r"\b(add|insert|append|include|write)\b"):
         return add_command(c)
     return text_update_command(c) or style_command(c)
+
+
+def background_command(c: Clause) -> Dict[str, Any]:
+    if not c.pptx:
+        raise Clarify("Background colour editing is currently available for PowerPoint presentations.")
+    color = find_color(c.masked)
+    if not color:
+        raise Clarify("Which background colour should I use? For example white, navy or #1F4E79.")
+    every_slide = c.has(r"\b(all|every|entire|whole)\b") or c.has(
+        r"\b(?:presentation|deck)\s+background\b|\bbackground\s+of\s+(?:the\s+)?(?:presentation|deck)\b"
+    )
+    target = {"type": "document"} if every_slide else {
+        "type": "slide", "slide": c.slide or c.ctx.current_slide
+    }
+    return {"action": "update_background", "target": target, "color": color}
 
 
 def image_command(c: Clause, removal: bool) -> Dict[str, Any]:

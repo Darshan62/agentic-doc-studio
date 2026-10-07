@@ -139,6 +139,17 @@ class PptxWorkflowTests(WorkspaceTestCase):
         latin = rpr.find("{http://schemas.openxmlformats.org/drawingml/2006/main}latin")
         self.assertEqual((rpr.get("sz"), latin.get("typeface")), ("3200", "Arial"))
 
+    def test_change_current_and_all_slide_background_colors(self):
+        result = self.chat("Change the background color of this slide to navy.", current_slide=2)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["state"]["preview"]["slides"][1]["background"], "#1F3864")
+        background = next(s for s in result["state"]["preview"]["slides"][1]["shapes"] if s["name"] == "Background")
+        self.assertEqual(background["fill"], "#1F3864")
+
+        result = self.chat("Make all slide backgrounds white.")
+        self.assertEqual(result["status"], "done")
+        self.assertTrue(all(slide["background"] == "#FFFFFF" for slide in result["state"]["preview"]["slides"]))
+
     def test_remove_third_bullet_from_slide_two(self):
         self.chat("Remove the third bullet from slide 2.")
         bullets = [text_of(p) for _, p in PptxDocument(self.working_file()).bullets(2)]

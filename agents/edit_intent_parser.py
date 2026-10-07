@@ -24,6 +24,7 @@ SCHEMA_HELP = """Each command is a JSON object:
 {"action": <action>, "target": {"type": <type>, "text": str|null, "index": int|null, "slide": int|null},
  "changes": {"font_family": str|null, "font_size": number|null, "bold": bool|null, "italic": bool|null,
              "underline": bool|null, "color": "blue"|"#1F4E79"|null, "align": "left"|"center"|"right"|"justify"|null},
+ "color": "blue"|"#1F4E79"|null,
  "text": str, "target_text": str, "replacement_text": str,
  "position": {"where": "after"|"before"|"start"|"end", "anchor": <target>},
  "scale": number, "move": {"dx_inches": number, "dy_inches": number} or {"to": "top-left"|"top-right"|"bottom-left"|"bottom-right"|"center"},
@@ -34,6 +35,7 @@ bullet (pptx: index within the slide, -1 = last), slide (pptx: all text on a sli
 selection (whatever the user clicked in the preview; use for "this"/"selected").
 Action rules:
 - update_style: needs target + changes (only the properties the user asked for; others null).
+- update_background (pptx): needs target slide (one slide) or document (all slides) + top-level "color".
 - update_text: replace the whole text of the target with "text".
 - replace_text: "target_text" -> "replacement_text" (optional target to limit the scope).
 - delete_text: remove "target_text", or (pptx) remove the target bullet/paragraph.
@@ -52,6 +54,8 @@ EXAMPLES = """Examples:
 "Remove the paragraph about pricing" -> {"commands":[{"action":"delete_paragraph","target":{"type":"paragraph","text":"pricing"}}],"clarification":null}
 "Add this after the executive summary: We deliver in 12 weeks." -> {"commands":[{"action":"insert_paragraph","text":"We deliver in 12 weeks.","position":{"where":"after","anchor":{"type":"heading","text":"Executive Summary"}}}],"clarification":null}
 "Remove the third bullet from slide 2" -> {"commands":[{"action":"delete_text","target":{"type":"bullet","index":3,"slide":2}}],"clarification":null}
+"Change the background of slide 2 to navy" -> {"commands":[{"action":"update_background","target":{"type":"slide","slide":2},"color":"navy"}],"clarification":null}
+"Make all slide backgrounds white" -> {"commands":[{"action":"update_background","target":{"type":"document"},"color":"white"}],"clarification":null}
 "Resize the logo on slide 1 to 80%" -> {"commands":[{"action":"resize_image","target":{"type":"logo","slide":1},"scale":0.8}],"clarification":null}
 "Change the font" -> {"commands":[],"clarification":"Which text would you like to change: the title, headings, body text, or the entire document?"}"""
 

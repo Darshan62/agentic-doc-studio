@@ -14,7 +14,9 @@ from unittest import mock
 
 from agents.document_analyzer import brand_colors
 from agents.ingestion_agent import IngestionAgent
+from agents.ppt_analyzer import PptAnalysisAgent
 from agents.supervisor import SupervisorAgent
+from agents.workspace_agent import run_workspace
 from core.gemini_client import GeminiError, ask_gemini, ask_gemini_json
 from core.ocr_vision import read_image_text
 from core.ooxml_docx import DocxBuilder, DocxReader
@@ -170,6 +172,27 @@ class TestPipeline(TempFolderTest):
         self.assertIn("[Web-1]", ids)
         self.assertIn("[RAG-1]", ids)
         self.assertEqual(result["validation"]["traceability"]["status"], "PASSED")
+
+    def test_generated_ppt_opens_in_themed_editor_workspace(self, _search):
+        result = self.run_generation(SupervisorAgent("test.db"))
+        opened = run_workspace({"op": "open", "path": result["generated_pptx"]})
+
+        self.assertEqual(opened["status"], "ok")
+        state = opened["state"]
+        self.assertEqual(state["active"]["name"], "Company_Presentation_Generated.pptx")
+        self.assertEqual(state["preview"]["type"], "pptx")
+        self.assertEqual(len(state["preview"]["slides"]), 12)
+
+        template_style = PptAnalysisAgent().analyze(PPT_TEMPLATE)["style_object"]
+        preview_colors = {
+            run["color"].lstrip("#").upper()
+            for slide in state["preview"]["slides"]
+            for shape in slide["shapes"]
+            for paragraph in shape.get("paragraphs", [])
+            for run in paragraph["runs"]
+            if run.get("color")
+        }
+        self.assertIn(template_style.primary_color, preview_colors)
 
     def test_edit_works_from_a_fresh_process(self, _search):
         self.run_generation(SupervisorAgent("test.db"))

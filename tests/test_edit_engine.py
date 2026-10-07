@@ -31,6 +31,15 @@ class SchemaTests(unittest.TestCase):
         cmd = validate_command({"action": "delete_slide", "target": {"type": "slide", "slide": 2}, "code": "rm -rf"}, "pptx")
         self.assertNotIn("code", cmd)
 
+    def test_background_command_is_normalised_and_pptx_only(self):
+        cmd = validate_command({"action": "update_background", "target": {"type": "slide", "slide": 2},
+                                "color": "navy"}, "pptx")
+        self.assertEqual(cmd["color"], "1F3864")
+        with self.assertRaises(EditError):
+            validate_command({"action": "update_background", "target": {"type": "title"}, "color": "blue"}, "pptx")
+        with self.assertRaises(EditError):
+            validate_command({"action": "update_background", "target": {"type": "document"}, "color": "blue"}, "docx")
+
     def test_rejects_action_for_wrong_document_type(self):
         with self.assertRaises(EditError):
             validate_command({"action": "delete_slide", "target": {"type": "slide", "slide": 1}}, "docx")
@@ -90,13 +99,23 @@ class RuleParserTests(unittest.TestCase):
             "Resize the logo on slide 1 to 80%.": {"action": "resize_image", "target": {"type": "logo", "slide": 1}, "scale": 0.8},
             "Move the logo slightly to the right.": {"action": "move_image", "target": {"type": "logo"}, "move": {"dx_inches": 0.25, "dy_inches": 0}},
             "Remove slide 5.": {"action": "delete_slide", "target": {"type": "slide", "slide": 5}},
+            "Change the background color of slide 2 to navy.":
+                {"action": "update_background", "target": {"type": "slide", "slide": 2}, "color": "navy"},
+            "Make all slide backgrounds white.":
+                {"action": "update_background", "target": {"type": "document"}, "color": "white"},
         }
         for message, expected in cases.items():
             with self.subTest(message=message):
                 self.assertEqual(rules(message, "pptx")["commands"], [expected])
 
+        current = rules("Change the background color of this slide to #123456.", "pptx", current_slide=4)
+        self.assertEqual(current["commands"], [
+            {"action": "update_background", "target": {"type": "slide", "slide": 4}, "color": "#123456"}
+        ])
+
     def test_ambiguous_requests_ask_instead_of_guessing(self):
         for message, doc_type in [("Change the font.", "docx"), ("Change the title color.", "pptx"),
+                                  ("Change the background color.", "pptx"),
                                   ("Resize the logo.", "pptx"), ("Add a bullet to slide 3.", "pptx"),
                                   ("Remove this paragraph.", "docx"), ("Move the logo slightly to the right.", "docx")]:
             with self.subTest(message=message):

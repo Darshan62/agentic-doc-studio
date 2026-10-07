@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.docx_model import phrase_pattern, replace_range
-from core.edit_describe import describe_changes, describe_target, plural, snippet
+from core.edit_describe import color_label, describe_changes, describe_target, plural, snippet
 from core.edit_schema import ClarificationNeeded, EditError, EditOutcome
 from core.ooxml_package import OoxmlPackage
 from core.pptx_images import apply_image_command
@@ -20,6 +20,20 @@ RPR_ORDER = ["ln", "noFill", "solidFill", "gradFill", "blipFill", "pattFill", "g
 FILL_TAGS = {"noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"}
 ALIGN = {"left": "l", "center": "ctr", "right": "r", "justify": "just"}
 SLIDE_REL_TYPE_SUFFIX = "/slide"
+
+
+def set_solid_fill(parent: ET.Element, color: str) -> None:
+    """Replace any DrawingML fill while preserving the required shape-property order."""
+    for child in list(parent):
+        if child.tag.split("}")[-1] in FILL_TAGS:
+            parent.remove(child)
+    fill = ET.Element(A + "solidFill")
+    ET.SubElement(fill, A + "srgbClr", {"val": color})
+    insert_at = 0
+    for index, child in enumerate(parent):
+        if child.tag.split("}")[-1] in ("xfrm", "prstGeom", "custGeom"):
+            insert_at = index + 1
+    parent.insert(insert_at, fill)
 
 
 def insert_ordered(rpr: ET.Element, element: ET.Element) -> None:
@@ -86,6 +100,8 @@ class PptxEditor:
             return apply_image_command(self.doc, cmd, image_bytes)
         if action == "delete_slide":
             return self.delete_slide(cmd["target"]["slide"])
+        if action == "update_background":
+            return self.update_background(cmd)
         if action == "update_style":
             return self.update_style(cmd)
         if action == "update_text":
@@ -159,6 +175,45 @@ class PptxEditor:
         return shape, [p]
 
     # ---------- operations ----------
+    def update_background(self, cmd: Dict[str, Any]) -> EditOutcome:
+        target, color = cmd["target"], cmd["color"]
+        numbers = (list(range(1, len(self.doc.slide_parts()) + 1))
+                   if target["type"] == "document" else [self.slide_of(target)])
+        width, height = self.doc.slide_size()
+        changed_shapes: List[str] = []
+        for number in numbers:
+            part = self.doc.slide_part(number)  # also validates the requested slide number
+            root = self.pkg.xml(part)
+            common = root.find(P + "cSld")
+            if common is None:
+                raise EditError(f"Slide {number} has no editable slide content.")
+
+            background = common.find(P + "bg")
+            if background is None:
+                background = ET.Element(P + "bg")
+                tree = common.find(P + "spTree")
+                common.insert(list(common).index(tree) if tree is not None else 0, background)
+            else:
+                background.clear()
+            properties = ET.SubElement(background, P + "bgPr")
+            set_solid_fill(properties, color)
+            ET.SubElement(properties, A + "effectLst")
+
+            # Generated decks contain a full-slide rectangle for their themed background.
+            # Update that too; otherwise it would visually cover the native slide background.
+            for shape in self.doc.shapes(number):
+                covers_slide = shape.x == 0 and shape.y == 0 and shape.cx >= width * 0.98 and shape.cy >= height * 0.98
+                if shape.name.strip().lower() != "background" and not covers_slide:
+                    continue
+                shape_properties = shape.el.find(P + "spPr")
+                if shape_properties is not None:
+                    set_solid_fill(shape_properties, color)
+                    changed_shapes.append(f"{number}:{shape.id}")
+
+        scope = f"all {len(numbers)} slides" if target["type"] == "document" else f"slide {numbers[0]}"
+        return EditOutcome(f"changed the background of {scope} to {color_label(color)}",
+                           slides=numbers, shapes=changed_shapes)
+
     def update_style(self, cmd: Dict[str, Any]) -> EditOutcome:
         target, changes = cmd["target"], cmd["changes"]
         resolved = self.resolve(target)

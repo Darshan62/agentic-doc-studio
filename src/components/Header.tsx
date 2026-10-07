@@ -36,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="text-lg font-bold tracking-tight text-white">DocuSynth Enterprise</h1>
+              <h1 className="text-lg font-bold tracking-tight text-white">Multi-Agent POC</h1>
               <span className="px-2 py-0.5 text-xs font-semibold bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">
                 Multi-Agent POC
               </span>
@@ -81,11 +81,10 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-2 text-xs font-medium rounded-md whitespace-nowrap transition-colors cursor-pointer ${
-                  isActive
-                    ? 'bg-blue-600 text-white font-semibold'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
+                className={`px-3 py-2 text-xs font-medium rounded-md whitespace-nowrap transition-colors cursor-pointer ${isActive
+                  ? 'bg-blue-600 text-white font-semibold'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
               >
                 {tab.label}
               </button>

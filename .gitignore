@@ -1,17 +1,40 @@
+# JavaScript dependencies and build output
 node_modules/
 build/
 dist/
 coverage/
-.DS_Store
 *.log
+
+# Python environments, caches, and coverage
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets
 .env*
 !.env.example
+keys.txt
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+.npmrc
+.pypirc
 
-# Generated at runtime
-__pycache__/
+# Generated application data
 output/
 versions/
 knowledge_store.db
 templates_and_samples/uploads/
 public/downloads/
+
+# Local tooling and OS metadata
 .playwright-mcp/
+.DS_Store
+Thumbs.db

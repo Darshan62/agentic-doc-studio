@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 DOCX_ACTIONS = {"update_style", "update_text", "replace_text", "delete_text", "delete_paragraph",
                 "insert_text", "insert_paragraph", "replace_image", "resize_image"}
-PPTX_ACTIONS = {"update_style", "update_text", "replace_text", "delete_text", "add_text",
+PPTX_ACTIONS = {"update_style", "update_background", "update_text", "replace_text", "delete_text", "add_text",
                 "delete_slide", "replace_image", "resize_image", "move_image"}
 ACTIONS = {"docx": DOCX_ACTIONS, "pptx": PPTX_ACTIONS}
 
@@ -207,6 +207,10 @@ def validate_command(raw: Any, doc_type: str) -> Dict[str, Any]:
 
     if action == "update_style":
         cmd["changes"] = validate_changes(raw.get("changes"))
+    elif action == "update_background":
+        # Accept the canonical top-level field and the common LLM variant for resilience.
+        changes = raw.get("changes") if isinstance(raw.get("changes"), dict) else {}
+        cmd["color"] = normalize_color(raw.get("color", changes.get("color")))
     elif action == "update_text":
         cmd["text"] = _text(raw.get("text"), "text", MAX_TEXT)
     elif action == "replace_text":
@@ -256,7 +260,7 @@ def _validate_move(raw: Any) -> Dict[str, Any]:
 
 def _check_target_requirements(cmd: Dict[str, Any]) -> None:
     action, target = cmd["action"], cmd.get("target")
-    needs_target = {"update_style", "update_text", "delete_paragraph", "insert_text",
+    needs_target = {"update_style", "update_background", "update_text", "delete_paragraph", "insert_text",
                     "replace_image", "resize_image", "move_image", "delete_slide"}
     if target is None:
         if action in needs_target:
@@ -268,5 +272,7 @@ def _check_target_requirements(cmd: Dict[str, Any]) -> None:
         return
     if action in ("replace_image", "resize_image", "move_image") and target["type"] not in IMAGE_TARGETS:
         raise EditError("Image commands must target an image or the logo.")
+    if action == "update_background" and target["type"] not in ("slide", "document"):
+        raise EditError("A background colour command must target a slide or the whole presentation.")
     if action == "delete_slide" and not target.get("slide") and target["type"] != "selection":
         raise EditError("Which slide should I delete?")

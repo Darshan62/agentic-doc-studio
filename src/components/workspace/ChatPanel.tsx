@@ -13,6 +13,8 @@ const SUGGESTIONS = {
     'Make the company logo 80% of its current size.',
   ],
   pptx: [
+    'Change the background color of this slide to navy.',
+    'Make all slide backgrounds white.',
     'Change the title on slide 1 to Arial, 32 points.',
     'Remove the third bullet from slide 2.',
     'Add a bullet to slide 3: Live preview of every change',

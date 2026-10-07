@@ -1,927 +1,238 @@
-# Enterprise Multi-Agent AI System: Document & PPT Generation POC
+# Agentic Doc Studio
 
-An enterprise-grade multi-agent AI chatbot platform designed to understand complex user requests, analyze uploaded documents and PowerPoint templates, conduct web research, retrieve proprietary knowledge through Enterprise Vector RAG, and autonomously generate **fully editable Microsoft Word documents (.docx) and 12-slide PowerPoint presentations (.pptx)**.
+**Repository:** `agentic-doc-studio`
 
-The platform features:
+A local-first AI workspace for generating, analyzing, and conversationally editing editable Microsoft Word (`.docx`) and PowerPoint (`.pptx`) files. The project combines a React interface, an Express API, a sequential Python agent pipeline, retrieval-augmented generation, and deterministic OpenXML editing.
 
-- A Supervisor/Orchestrator coordinating 9 specialized sub-agents.
-- Multi-format document ingestion, including DOCX, PPTX, PDF, and scanned images.
-- OCR and vision-based document analysis.
-- Template-aware document and presentation generation.
-- Enterprise knowledge retrieval using vector search and RAG.
-- Conversational in-place editing and bidirectional DOCX/PPTX conversion.
-- Citation provenance, validation, and version management.
+> **Project status:** functional MVP/academic proof of concept. It is intended for local evaluation and portfolio demonstration, not production or untrusted multi-user deployment. See [Project Status](docs/PROJECT_STATUS.md) for the audited readiness assessment.
 
----
+## Key Features
 
-## ✍️ AI Editor Workspace (chat-driven DOCX/PPTX editing)
+- Generates editable Word documents and 12-slide PowerPoint decks from natural-language requests and supplied templates.
+- Coordinates specialized modules for ingestion, document and presentation analysis, research, retrieval, writing, generation, and validation.
+- Provides a split-screen editor with chat, live document previews, targeted edits, version history, undo, redo, and download.
+- Converts between DOCX and PPTX formats.
+- Ingests DOCX, PPTX, PDF, text, Markdown, and common image formats for analysis or retrieval.
+- Preserves source traceability through web and local-RAG citation records.
+- Runs locally with Ollama by default; Gemini is an optional cloud provider and enables live Google Search grounding.
+- Builds Office files directly with OpenXML, without requiring Microsoft Office on the server.
 
-The default **AI Editor Workspace** tab is a split screen: chat on the left, a live preview of the open
-`.docx` / `.pptx` on the right. Plain-English requests become validated JSON edit commands that a
-deterministic OpenXML editor applies to the real file. The model never writes code or XML.
+## Architecture
 
+```mermaid
+flowchart LR
+    UI[React + Vite UI] --> API[Express API]
+    API -->|child process| Bridge[Python bridge]
+    Bridge --> Supervisor[Sequential supervisor]
+    Supervisor --> Agents[Analysis, research, RAG, writing, generation, validation]
+    Agents --> Files[Editable DOCX and PPTX]
+    UI --> Editor[Conversational editor]
+    Editor --> Schema[Validated edit commands]
+    Schema --> OpenXML[Deterministic OpenXML edits]
+    OpenXML --> Versions[Working copy + version history]
 ```
-message → Edit Intent Parser (configured LLM, JSON only; built-in rule parser as fallback)
-        → core/edit_schema.py validate_command (whitelisted actions / targets / values)
-        → core/docx_editor.py or core/pptx_editor.py (targeted in-place XML edits)
-        → saved working copy + version snapshot (v1.0, v1.1, …) → preview JSON → chat reply
-```
 
-| Word (.docx) | PowerPoint (.pptx) |
+The generation workflow is a sequential, modular multi-agent pipeline rather than a distributed autonomous-agent system. The TypeScript server starts `run_pipeline.py` for backend operations. Generation requests pass through the supervisor; workspace edits use a dedicated editor path.
+
+Editing requests are converted into a constrained JSON command, validated against an allowlist, and applied to a working copy of the Office file. The original input is not modified.
+
+## Multi-Agent Architecture
+
+The supervisor coordinates a fixed sequence of focused Python modules. These modules have agent-style responsibilities, but they do not communicate asynchronously or use a dynamic planning graph.
+
+| Stage | Components | Responsibility |
+|---|---|---|
+| Orchestration | Supervisor | Runs the generation stages in order, records execution steps, and persists session state |
+| Analysis | Document Analyzer, PPT Analyzer | Extracts document and presentation style information from the selected templates |
+| Knowledge | Ingestion Agent, Web Research Agent, RAG Agent | Parses uploaded material, optionally gathers grounded web results, and retrieves relevant local chunks |
+| Synthesis | Content Writer | Produces structured document sections and slide content with the configured LLM |
+| Output | Document Generator, PPT Generator | Builds native DOCX and PPTX packages using the extracted styles |
+| Quality | Validation Agent | Checks package validity, presentation structure, styling, and citation coverage |
+| Utilities | Conversion Agent | Converts generated content between DOCX and PPTX representations |
+| Editing | Workspace Agent, intent parsers, OpenXML editors | Resolves conversational requests into validated, targeted edits with version history |
+
+## Current Capabilities
+
+| Area | Implemented behavior |
 |---|---|
-| `update_style` (font, size, bold, italic, underline, colour, alignment) | `update_style` |
-| `update_text`, `replace_text`, `delete_text`, `insert_text` | `update_text`, `replace_text`, `delete_text` (text or bullet) |
-| `delete_paragraph`, `insert_paragraph` (after/before a heading or paragraph, start, end) | `add_text` (new bullet), `delete_slide` |
-| `replace_image`, `resize_image` (the logo) | `replace_image`, `resize_image`, `move_image` |
+| Generation | Template-aware DOCX and 12-slide PPTX creation |
+| Word editing | Text updates, replacement, insertion and deletion; paragraph operations; font, emphasis, color, size, and alignment changes; image replacement and resizing |
+| PowerPoint editing | Text and bullet updates; slide deletion; text addition; style and background updates; image replacement, resizing, and movement |
+| Retrieval | Local SQLite knowledge store with hashed n-gram vectors and cosine similarity |
+| Research | Live Google Search grounding when Gemini is configured; skipped in default Ollama mode |
+| OCR | Image analysis through the configured Ollama vision model or Gemini vision |
+| History | Workspace snapshots, undo, redo, restore, and downloadable edited copies |
+| Conversion | DOCX to PPTX and PPTX to DOCX |
 
-- Ambiguous requests get a clarifying question (with clickable options when several paragraphs/images match).
-- Click a paragraph, text box or the logo in the preview, then say “this” (“Remove this paragraph”).
-- Every successful edit is a new version. Undo/redo and the version menu restore earlier versions.
-- The original file is never modified: the workspace edits a copy in `output/workspace/`.
-- Demo files: `python -m templates_and_samples.create_demo_files` rebuilds `templates_and_samples/demo/`.
-- `EDIT_PARSER=auto|llm|rules` (default `auto`: configured LLM first, rule parser on any LLM failure).
-- Run: `npm install`, `pip install -r requirements.txt`, `npm run dev`, then open http://127.0.0.1:3000.
-- Tests: `python -m unittest tests.test_multi_agent_system tests.test_edit_engine tests.test_edit_operations tests.test_editor_workspace`.
+The local retrieval implementation is intentionally lightweight and is not equivalent to a production semantic-embedding/vector-database stack.
 
----
+## Technology Stack
 
-## Local AI with Ollama (default)
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS
+- **API:** Express 4 on Node.js
+- **Backend:** Python standard library plus `pypdf`
+- **AI providers:** Ollama by default; optional Google Gemini
+- **Document engine:** native OpenXML package parsing and generation
+- **Persistence:** SQLite and local filesystem
+- **Testing:** Python `unittest` and TypeScript compiler checks
 
-The application runs document generation, structured editing, and image OCR locally through Ollama. For the recommended 16 GB RAM / 4 GB VRAM configuration:
+## Prerequisites
 
-```env
-AI_PROVIDER=ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3:4b
-OLLAMA_VISION_MODEL=qwen3-vl:8b
-OLLAMA_NUM_CTX=8192
-OLLAMA_NUM_PREDICT=4096
+- Node.js compatible with Vite 8
+- Python 3
+- npm
+- For the default local setup: [Ollama](https://ollama.com/) with `qwen3:4b` and, for image OCR, `qwen3-vl:8b`
+- For the optional cloud setup: a Gemini API key
+
+## Quick Start
+
+### 1. Install dependencies
+
+```powershell
+npm install
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-Install the models once, then generation works without internet:
+On macOS or Linux, activate the environment with `source .venv/bin/activate`.
+
+### 2. Configure the application
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The example configuration selects Ollama and contains no real credentials. Pull the default models once:
 
 ```powershell
 ollama pull qwen3:4b
 ollama pull qwen3-vl:8b
+```
+
+To use Gemini instead, set `AI_PROVIDER=gemini` and provide `GEMINI_API_KEY` in your local `.env`. Never commit `.env`, API keys, or other credential files.
+
+### 3. Run the development server
+
+```powershell
 npm run dev
 ```
 
-Google Search grounding is intentionally skipped in local mode; uploaded files and local RAG remain available. To use the optional cloud provider and Google Search, set `AI_PROVIDER=gemini` and `GEMINI_API_KEY` in `.env`. See `.env.example` for all settings.
+Open <http://127.0.0.1:3000>. The server intentionally binds to localhost because the current API has no authentication.
 
-`qwen3:14b` fits in system memory but is not recommended on a 4 GB GPU: most layers run on the CPU, so a document-sized JSON response can take longer than five minutes. Ollama responses are consumed as a stream, while `OLLAMA_NUM_PREDICT` bounds unusually long output.
+## Common Commands
 
----
+```powershell
+# TypeScript validation
+npm run lint
 
-## 🏛️ System Architecture
+# Production build
+npm run build
 
-```text
-                    ┌─────────────────────────────┐
-                    │       User Prompt/Input     │
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │  Supervisor / Orchestrator  │
-                    └──────────────┬──────────────┘
-                                   │
-           ┌───────────────────────┼───────────────────────┐
-           ▼                       ▼                       ▼
- ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
- │ Document Analyzer│   │   PPT Analyzer   │   │  Web Researcher  │
- │   DOCX/PDF/OCR   │   │ PPTX Templates   │   │  Real-Time Search│
- └─────────┬────────┘   └─────────┬────────┘   └─────────┬────────┘
-           │                      │                      │
-           └──────────────────────┼──────────────────────┘
-                                  ▼
-                       ┌────────────────────┐
-                       │   Enterprise RAG   │
-                       │  Vector DB / KB     │
-                       └─────────┬──────────┘
-                                 ▼
-                    ┌─────────────────────────────┐
-                    │      Generation Agents      │
-                    ├──────────────┬──────────────┤
-                    │ Doc Generator│ PPT Generator│
-                    └───────┬──────┴──────┬───────┘
-                            │             │
-                            └──────┬──────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │       Validation Agent      │
-                    │   Style, QA, Grounding      │
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │ Editable DOCX & 12-Slide PPTX│
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │ Conversational Editor &     │
-                    │ Conversion Engine           │
-                    └─────────────────────────────┘
+# Python test suite
+python -m unittest discover -s tests -v
+
+# Rebuild the editor demo files
+python -m templates_and_samples.create_demo_files
 ```
 
----
+The test suite mocks model calls, so it does not require an API key or a running Ollama instance.
 
-## 🤖 Specialized Multi-Agent Roles
+## Demo Workflow
 
-| Agent | Architecture Role | Responsibility |
+1. Start Ollama and run the development server.
+2. Open the **Chat & Orchestrator** tab and optionally upload trusted source material.
+3. Select the bundled or uploaded DOCX and PPTX templates.
+4. Enter a generation request. The supervisor analyzes the templates, gathers available context, writes structured content, builds both Office files, and validates the results.
+5. Review the generated artifacts and their citation traceability.
+6. Open a generated or uploaded file in the **AI Editor Workspace**.
+7. Select a paragraph, text box, slide element, or image and enter a plain-language edit request.
+8. Review the new version, exercise undo/redo, and download the edited native Office file.
+
+With the default Ollama configuration, the workflow uses uploaded/local knowledge and skips live web search. Configure Gemini to demonstrate live Google Search grounding. A presenter-oriented walkthrough is available in [Demo Script](docs/DEMO_SCRIPT.md).
+
+## Repository Layout
+
+```text
+.
+├── agents/                 # Pipeline agents, edit parsing, and workspace coordination
+├── core/                   # OpenXML, previews, LLM adapters, RAG, citations, and versions
+├── docs/                   # Audited architecture, API, security, testing, and project docs
+├── scripts/                # Project packaging utility
+├── src/                    # React/TypeScript frontend
+├── templates_and_samples/  # Versioned templates, demo files, and sample knowledge
+├── tests/                  # Python unit and integration tests
+├── run_pipeline.py         # JSON bridge between Express and Python
+├── server.ts               # Local Express API and Vite host
+└── .env.example            # Safe configuration template
+```
+
+Runtime output, uploads, workspace versions, the local knowledge database, environments, and local secrets are excluded from version control.
+
+## API Overview
+
+The UI uses the local API exposed by `server.ts`. Principal routes include:
+
+| Method | Route | Purpose |
 |---|---|---|
-| Supervisor / Orchestrator | Central Controller | Decomposes tasks into execution graphs, tracks inter-agent state, enforces validation gates, and records execution traces through `AgentStepLog`. |
-| Document Analysis Agent | File Inspector | Analyzes DOCX, PDF, and scanned documents. Extracts typography, color palettes, margins, heading hierarchies, and tone of voice. |
-| PPT Analysis Agent | Presentation Inspector | Analyzes PowerPoint templates, slide masters, 16:9 geometries, theme palettes, layouts, and content patterns. |
-| Web Research Agent | Real-Time Intelligence | Formulates search queries, gathers industry information, and produces source citations. |
-| Enterprise RAG Agent | Knowledge Grounding | Retrieves proprietary policies, SLAs, and technical directives from the enterprise vector database. |
-| Document Generation Agent | Word Synthesis | Generates professional Word proposals with styled headings, executive summaries, tables, and citations. |
-| PPT Generation Agent | Presentation Synthesis | Generates 12-slide widescreen presentations with structured layouts, dashboards, diagrams, roadmaps, and citations. |
-| Validation Agent | QA & Compliance | Validates OpenXML integrity, slide count, template styling, and citation coverage. |
-| Conversational Editing Agent | In-Place Refinement | Applies natural-language editing instructions while preserving the existing design system. |
-| Conversion Agent | Format Translation | Converts Word proposals to PowerPoint decks and PowerPoint decks to Word reports. |
-
----
-
-## 📂 Core Engine Capabilities
-
-### 1. Native OpenXML Engine
-
-The platform uses a Python-based OpenXML builder and parser:
-
-- `core/ooxml_docx.py`
-- `core/ooxml_pptx.py`
-
-It generates editable DOCX and PPTX files compatible with Microsoft Office 365, LibreOffice, and Google Docs without requiring desktop Office binaries.
-
-### 2. Multi-Format Ingestion & Vision OCR
-
-Supported document formats:
-
-| Format | Processing |
-|---|---|
-| DOCX | Parses XML packages, styles, headings, tables, and formatting. |
-| PPTX | Extracts slide masters, layouts, theme colors, and presentation structure. |
-| PDF | Uses a custom parser to extract text operators and document structure. |
-| PNG, JPG, TIFF | Uses the vision/OCR processing module to inspect layout zones and extract textual content. |
-
-Core modules:
-
-- `core/pdf_parser.py`
-- `core/ocr_vision.py`
-
-### 3. Enterprise Vector RAG & Local Embedding Engine
-
-The retrieval system includes:
-
-- **Pinecone-compatible architecture:** Modular adapter for enterprise cloud Pinecone instances.
-- **Dense vector search:** NumPy-based semantic search using hashed n-gram tokenization.
-- **Similarity scoring:** L2 normalization and cosine similarity.
-- **Sliding-window chunking:** 400-character chunks with 80-character overlap.
-- **Persistent storage:** SQLite-backed knowledge storage.
-
-Core module: `core/vector_store.py`
-
-### 4. Source Traceability & Versioning
-
-The system provides:
-
-- Citation tags such as `[Web-1]` and `[RAG-1]`.
-- Reference URLs, supporting evidence, confidence scores, and timestamps.
-- Version snapshots such as `v1.0`, `v1.1`, and `v2.0`.
-- Unified diff calculation and changelog audit logging.
-
-Core modules:
-
-- `core/version_manager.py`
-- `core/citation_tracker.py`
-
----
-
-## 🚀 Example Workflow & Verification
-
-The end-to-end demonstration is implemented through `demo_workflow.py` and `tests/test_all.py`.
-
-### Step 1: Template Analysis
-
-The Document Analyzer and PPT Analyzer inspect uploaded templates.
-
-**Sample DOCX analysis:**
-
-- Primary font: Georgia
-- Palette: Navy `#1B365D`, Cyan `#00A3E0`
-- Tone: Executive, strategic, analytical, and formal
-- Tone score: 0.95
-
-**Sample PPTX analysis:**
-
-- Master: 16:9 widescreen
-- Dimensions: `12192000 × 6858000 EMU`
-- Font: Arial
-- Palette: Navy `#0F2D59`, Blue `#2563EB`, Emerald `#10B981`
-
-### Step 2: User Request Processing
-
-Example prompt:
-
-> Research the latest Generative AI trends and create a proposal and 12-slide presentation using the same tone and style as the uploaded files.
-
-The Supervisor decomposes the request into a multi-stage execution graph.
-
-Generated artifacts:
-
-- `output/Company_Proposal_Generated.docx`
-- `output/Company_Presentation_Generated.pptx`
-
-### Step 3: Validation
-
-The Validation Agent checks:
-
-- OpenXML integrity
-- Presentation slide count
-- Citation coverage
-- Template style adherence
-
-**Reported demonstration results:**
-
-- Quality score: 100.0%
-- OpenXML integrity: PASS
-- Slide count: 12 — PASS
-- Citations: 7 — PASS
-
-### Step 4: Citation Traceability
-
-Example sources recorded in the demonstration:
-
-- `[Web-1]` Gartner Top Strategic Technology Trends 2025
-- `[Web-2]` McKinsey Global Institute: Economic Potential of Generative AI in 2025
-- `[Web-3]` Stanford AI Index 2024
-- `[Web-4]` MIT Technology Review: Domain-Specific Small Language Models
-- `[Web-5]` IDC Enterprise AI Governance and EU AI Act Implementation Framework
-- `[RAG-1]` Acme Enterprise AI Strategy 2025
-
-### Step 5: Conversational Refinements
-
-| User Instruction | Demonstrated Action |
-|---|---|
-| Add an executive summary. | Adds an executive summary callout to the DOCX and a summary slide to the PPTX. |
-| Make the presentation more concise. | Condenses slide bullets by 40%. |
-| Add a competitive analysis section. | Adds a five-column competitive matrix to the DOCX and PPTX. |
-| Update the report using the latest web information. | Runs a fresh web query, updates information, and advances the version to v2.0. |
-
-### Step 6: Bidirectional Conversion
-
-The conversion engine supports:
-
-- DOCX proposal → 16:9 PowerPoint presentation
-- PPTX presentation → narrative Word report
-
-Example outputs:
-
-- `output/Converted_From_Proposal.pptx`
-- `output/Converted_From_Presentation.docx`
-
----
-
-## 📁 Repository Structure
-
-```text
-multi_agent_doc_ppt/
-│
-├── app.py
-├── demo_workflow.py
-├── requirements.txt
-├── README.md
-├── knowledge_store.db
-│
-├── agents/
-│   ├── supervisor.py
-│   ├── document_analyzer.py
-│   ├── ppt_analyzer.py
-│   ├── web_researcher.py
-│   ├── rag_agent.py
-│   ├── doc_generator.py
-│   ├── ppt_generator.py
-│   ├── validator.py
-│   ├── conversational_editor.py
-│   └── converter.py
-│
-├── core/
-│   ├── models.py
-│   ├── ooxml_docx.py
-│   ├── ooxml_pptx.py
-│   ├── pdf_parser.py
-│   ├── ocr_vision.py
-│   ├── vector_store.py
-│   ├── version_manager.py
-│   └── citation_tracker.py
-│
-├── api/
-│   ├── server.py
-│   └── web_ui.py
-│
-├── templates_and_samples/
-│   ├── Company_Proposal.docx
-│   ├── Company_Template.pptx
-│   ├── Scanned_Architecture_Brief.png
-│   ├── create_samples.py
-│   └── knowledge_base/
-│       ├── Acme_Enterprise_AI_Strategy_2025.txt
-│       ├── Acme_Security_and_Governance_Standards.txt
-│       └── Acme_Market_Expansion_Brief.txt
-│
-├── output/
-│   ├── Company_Proposal_Generated.docx
-│   ├── Company_Presentation_Generated.pptx
-│   ├── Converted_From_Proposal.pptx
-│   └── Converted_From_Presentation.docx
-│
-├── versions/
-│
-└── tests/
-    └── test_all.py
-```
-
----
-
-## 🛠️ Installation & Usage
-
-### Prerequisites
-
-- Python 3
-- Dependencies listed in `requirements.txt`
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Run the End-to-End Demo
-
-```bash
-python3 app.py --demo
-```
-
-### 3. Launch the Web Chatbot & REST Server
-
-```bash
-python3 app.py --server --port 8080
-```
-
-Open the following URL in your browser:
-
-```text
-http://localhost:8080
-```
-
-### 4. Start the Interactive Terminal Chatbot
-
-```bash
-python3 app.py --chat
-```
-
-### 5. Run the Test Suite
-
-```bash
-python3 app.py --test
-```
-
-The project documentation reports that all 11 unit and integration tests pass in under 0.1 seconds.
-
----
-
-## 📡 REST API Reference
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Serves the responsive chatbot dashboard. |
-| GET | `/api/health` | Returns system status and vector store statistics. |
-| POST | `/api/chat` | Main orchestrator generation endpoint. Accepts a prompt. |
-| POST | `/api/upload` | Uploads DOCX, PPTX, PDF, and image files. |
-| POST | `/api/edit` | Applies conversational editing instructions. |
-| POST | `/api/convert` | Converts between DOCX and PPTX formats. |
-| GET | `/api/artifacts` | Lists generated files and their download URLs. |
-| GET | `/api/download/<filename>` | Downloads generated DOCX or PPTX files. |
-| GET | `/api/traceability` | Returns citation and claim lineage information. |
-| GET | `/api/versions` | Returns version history and diff logs. |
-
-### Example Request Bodies
-
-**Chat generation — `POST /api/chat`**
-
-```json
-{
-  "prompt": "Create a proposal using the uploaded template."
-}
-```
-
-**Conversational editing — `POST /api/edit`**
-
-```json
-{
-  "instruction": "Add an executive summary."
-}
-```
-
-**Document conversion — `POST /api/convert`**
-
-```json
-{
-  "direction": "docx_to_pptx"
-}
-```
-
-Supported conversion directions:
-
-- `docx_to_pptx`
-- `pptx_to_docx`
-
----
-
-## 📋 Project Deliverables
-
-1. **Multi-agent chatbot POC:** CLI, REST API, and web dashboard.
-2. **Modular source code:** Organized into agents, core engines, API services, and supporting scripts.
-3. **Template analysis:** Extraction of typography, brand palettes, margins, layouts, and tone.
-4. **Web research and Enterprise RAG:** Research capabilities and vector-based knowledge retrieval.
-5. **Editable document generation:** Native OpenXML DOCX and 12-slide PPTX outputs.
-6. **Conversational editing:** Refinements for executive summaries, conciseness, competitive analysis, and updated information.
-7. **Citation traceability:** Provenance mapping, confidence ratings, and source references.
-8. **Sample templates and outputs:** Included in the project directories.
-9. **Technical documentation:** Architecture diagrams, usage instructions, and API specifications.
-10. **Requirements and Git repository:** Dependency specifications and repository initialization on the `main` branch.
-
----
-
-## 🧪 Testing
-
-The project includes an automated test suite:
-
-```bash
-python3 app.py --test
-```
-
-Test file:
-
-```text
-tests/test_all.py
-```
-
-The documented test suite contains 11 unit and integration tests.
-
----
-
-## 🔮 Future Enhancements
-
-Potential areas for further development include:
-
-- Integration with production-grade LLM APIs.
-- Improved semantic embeddings and retrieval quality.
-- Authentication and role-based access control.
-- Enhanced OCR and complex document-layout recognition.
-- More advanced template fidelity and formatting validation.
-- Expanded evaluation datasets and automated quality benchmarks.
-- Production deployment, monitoring, and observability.
-
----
-
-## 📄 License
-
-Add the applicable license information here before distributing the project publicly.
-
----
-
-**Enterprise Multi-Agent AI System — Document & PPT Generation POC**
-
-*Automating document intelligence, enterprise knowledge retrieval, and editable business content generation.*# Enterprise Multi-Agent AI System: Document & PPT Generation POC
-
-An enterprise-grade multi-agent AI chatbot platform designed to understand complex user requests, analyze uploaded documents and PowerPoint templates, conduct web research, retrieve proprietary knowledge through Enterprise Vector RAG, and autonomously generate **fully editable Microsoft Word documents (.docx) and 12-slide PowerPoint presentations (.pptx)**.
-
-The platform features:
-
-- A Supervisor/Orchestrator coordinating 9 specialized sub-agents.
-- Multi-format document ingestion, including DOCX, PPTX, PDF, and scanned images.
-- OCR and vision-based document analysis.
-- Template-aware document and presentation generation.
-- Enterprise knowledge retrieval using vector search and RAG.
-- Conversational in-place editing and bidirectional DOCX/PPTX conversion.
-- Citation provenance, validation, and version management.
-
----
-
-## 🏛️ System Architecture
-
-```text
-                    ┌─────────────────────────────┐
-                    │       User Prompt/Input     │
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │  Supervisor / Orchestrator  │
-                    └──────────────┬──────────────┘
-                                   │
-           ┌───────────────────────┼───────────────────────┐
-           ▼                       ▼                       ▼
- ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
- │ Document Analyzer│   │   PPT Analyzer   │   │  Web Researcher  │
- │   DOCX/PDF/OCR   │   │ PPTX Templates   │   │  Real-Time Search│
- └─────────┬────────┘   └─────────┬────────┘   └─────────┬────────┘
-           │                      │                      │
-           └──────────────────────┼──────────────────────┘
-                                  ▼
-                       ┌────────────────────┐
-                       │   Enterprise RAG   │
-                       │  Vector DB / KB     │
-                       └─────────┬──────────┘
-                                 ▼
-                    ┌─────────────────────────────┐
-                    │      Generation Agents      │
-                    ├──────────────┬──────────────┤
-                    │ Doc Generator│ PPT Generator│
-                    └───────┬──────┴──────┬───────┘
-                            │             │
-                            └──────┬──────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │       Validation Agent      │
-                    │   Style, QA, Grounding      │
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │ Editable DOCX & 12-Slide PPTX│
-                    └──────────────┬──────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │ Conversational Editor &     │
-                    │ Conversion Engine           │
-                    └─────────────────────────────┘
-```
-
----
-
-## 🤖 Specialized Multi-Agent Roles
-
-| Agent | Architecture Role | Responsibility |
-|---|---|---|
-| Supervisor / Orchestrator | Central Controller | Decomposes tasks into execution graphs, tracks inter-agent state, enforces validation gates, and records execution traces through `AgentStepLog`. |
-| Document Analysis Agent | File Inspector | Analyzes DOCX, PDF, and scanned documents. Extracts typography, color palettes, margins, heading hierarchies, and tone of voice. |
-| PPT Analysis Agent | Presentation Inspector | Analyzes PowerPoint templates, slide masters, 16:9 geometries, theme palettes, layouts, and content patterns. |
-| Web Research Agent | Real-Time Intelligence | Formulates search queries, gathers industry information, and produces source citations. |
-| Enterprise RAG Agent | Knowledge Grounding | Retrieves proprietary policies, SLAs, and technical directives from the enterprise vector database. |
-| Document Generation Agent | Word Synthesis | Generates professional Word proposals with styled headings, executive summaries, tables, and citations. |
-| PPT Generation Agent | Presentation Synthesis | Generates 12-slide widescreen presentations with structured layouts, dashboards, diagrams, roadmaps, and citations. |
-| Validation Agent | QA & Compliance | Validates OpenXML integrity, slide count, template styling, and citation coverage. |
-| Conversational Editing Agent | In-Place Refinement | Applies natural-language editing instructions while preserving the existing design system. |
-| Conversion Agent | Format Translation | Converts Word proposals to PowerPoint decks and PowerPoint decks to Word reports. |
-
----
-
-## 📂 Core Engine Capabilities
-
-### 1. Native OpenXML Engine
-
-The platform uses a Python-based OpenXML builder and parser:
-
-- `core/ooxml_docx.py`
-- `core/ooxml_pptx.py`
-
-It generates editable DOCX and PPTX files compatible with Microsoft Office 365, LibreOffice, and Google Docs without requiring desktop Office binaries.
-
-### 2. Multi-Format Ingestion & Vision OCR
-
-Supported document formats:
-
-| Format | Processing |
-|---|---|
-| DOCX | Parses XML packages, styles, headings, tables, and formatting. |
-| PPTX | Extracts slide masters, layouts, theme colors, and presentation structure. |
-| PDF | Uses a custom parser to extract text operators and document structure. |
-| PNG, JPG, TIFF | Uses the vision/OCR processing module to inspect layout zones and extract textual content. |
-
-Core modules:
-
-- `core/pdf_parser.py`
-- `core/ocr_vision.py`
-
-### 3. Enterprise Vector RAG & Local Embedding Engine
-
-The retrieval system includes:
-
-- **Pinecone-compatible architecture:** Modular adapter for enterprise cloud Pinecone instances.
-- **Dense vector search:** NumPy-based semantic search using hashed n-gram tokenization.
-- **Similarity scoring:** L2 normalization and cosine similarity.
-- **Sliding-window chunking:** 400-character chunks with 80-character overlap.
-- **Persistent storage:** SQLite-backed knowledge storage.
-
-Core module: `core/vector_store.py`
-
-### 4. Source Traceability & Versioning
-
-The system provides:
-
-- Citation tags such as `[Web-1]` and `[RAG-1]`.
-- Reference URLs, supporting evidence, confidence scores, and timestamps.
-- Version snapshots such as `v1.0`, `v1.1`, and `v2.0`.
-- Unified diff calculation and changelog audit logging.
-
-Core modules:
-
-- `core/version_manager.py`
-- `core/citation_tracker.py`
-
----
-
-## 🚀 Example Workflow & Verification
-
-The end-to-end demonstration is implemented through `demo_workflow.py` and `tests/test_all.py`.
-
-### Step 1: Template Analysis
-
-The Document Analyzer and PPT Analyzer inspect uploaded templates.
-
-**Sample DOCX analysis:**
-
-- Primary font: Georgia
-- Palette: Navy `#1B365D`, Cyan `#00A3E0`
-- Tone: Executive, strategic, analytical, and formal
-- Tone score: 0.95
-
-**Sample PPTX analysis:**
-
-- Master: 16:9 widescreen
-- Dimensions: `12192000 × 6858000 EMU`
-- Font: Arial
-- Palette: Navy `#0F2D59`, Blue `#2563EB`, Emerald `#10B981`
-
-### Step 2: User Request Processing
-
-Example prompt:
-
-> Research the latest Generative AI trends and create a proposal and 12-slide presentation using the same tone and style as the uploaded files.
-
-The Supervisor decomposes the request into a multi-stage execution graph.
-
-Generated artifacts:
-
-- `output/Company_Proposal_Generated.docx`
-- `output/Company_Presentation_Generated.pptx`
-
-### Step 3: Validation
-
-The Validation Agent checks:
-
-- OpenXML integrity
-- Presentation slide count
-- Citation coverage
-- Template style adherence
-
-**Reported demonstration results:**
-
-- Quality score: 100.0%
-- OpenXML integrity: PASS
-- Slide count: 12 — PASS
-- Citations: 7 — PASS
-
-### Step 4: Citation Traceability
-
-Example sources recorded in the demonstration:
-
-- `[Web-1]` Gartner Top Strategic Technology Trends 2025
-- `[Web-2]` McKinsey Global Institute: Economic Potential of Generative AI in 2025
-- `[Web-3]` Stanford AI Index 2024
-- `[Web-4]` MIT Technology Review: Domain-Specific Small Language Models
-- `[Web-5]` IDC Enterprise AI Governance and EU AI Act Implementation Framework
-- `[RAG-1]` Acme Enterprise AI Strategy 2025
-
-### Step 5: Conversational Refinements
-
-| User Instruction | Demonstrated Action |
-|---|---|
-| Add an executive summary. | Adds an executive summary callout to the DOCX and a summary slide to the PPTX. |
-| Make the presentation more concise. | Condenses slide bullets by 40%. |
-| Add a competitive analysis section. | Adds a five-column competitive matrix to the DOCX and PPTX. |
-| Update the report using the latest web information. | Runs a fresh web query, updates information, and advances the version to v2.0. |
-
-### Step 6: Bidirectional Conversion
-
-The conversion engine supports:
-
-- DOCX proposal → 16:9 PowerPoint presentation
-- PPTX presentation → narrative Word report
-
-Example outputs:
-
-- `output/Converted_From_Proposal.pptx`
-- `output/Converted_From_Presentation.docx`
-
----
-
-## 📁 Repository Structure
-
-```text
-multi_agent_doc_ppt/
-│
-├── app.py
-├── demo_workflow.py
-├── requirements.txt
-├── README.md
-├── knowledge_store.db
-│
-├── agents/
-│   ├── supervisor.py
-│   ├── document_analyzer.py
-│   ├── ppt_analyzer.py
-│   ├── web_researcher.py
-│   ├── rag_agent.py
-│   ├── doc_generator.py
-│   ├── ppt_generator.py
-│   ├── validator.py
-│   ├── conversational_editor.py
-│   └── converter.py
-│
-├── core/
-│   ├── models.py
-│   ├── ooxml_docx.py
-│   ├── ooxml_pptx.py
-│   ├── pdf_parser.py
-│   ├── ocr_vision.py
-│   ├── vector_store.py
-│   ├── version_manager.py
-│   └── citation_tracker.py
-│
-├── api/
-│   ├── server.py
-│   └── web_ui.py
-│
-├── templates_and_samples/
-│   ├── Company_Proposal.docx
-│   ├── Company_Template.pptx
-│   ├── Scanned_Architecture_Brief.png
-│   ├── create_samples.py
-│   └── knowledge_base/
-│       ├── Acme_Enterprise_AI_Strategy_2025.txt
-│       ├── Acme_Security_and_Governance_Standards.txt
-│       └── Acme_Market_Expansion_Brief.txt
-│
-├── output/
-│   ├── Company_Proposal_Generated.docx
-│   ├── Company_Presentation_Generated.pptx
-│   ├── Converted_From_Proposal.pptx
-│   └── Converted_From_Presentation.docx
-│
-├── versions/
-│
-└── tests/
-    └── test_all.py
-```
-
----
-
-## 🛠️ Installation & Usage
-
-### Prerequisites
-
-- Python 3
-- Dependencies listed in `requirements.txt`
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Run the End-to-End Demo
-
-```bash
-python3 app.py --demo
-```
-
-### 3. Launch the Web Chatbot & REST Server
-
-```bash
-python3 app.py --server --port 8080
-```
-
-Open the following URL in your browser:
-
-```text
-http://localhost:8080
-```
-
-### 4. Start the Interactive Terminal Chatbot
-
-```bash
-python3 app.py --chat
-```
-
-### 5. Run the Test Suite
-
-```bash
-python3 app.py --test
-```
-
-The project documentation reports that all 11 unit and integration tests pass in under 0.1 seconds.
-
----
-
-## 📡 REST API Reference
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Serves the responsive chatbot dashboard. |
-| GET | `/api/health` | Returns system status and vector store statistics. |
-| POST | `/api/chat` | Main orchestrator generation endpoint. Accepts a prompt. |
-| POST | `/api/upload` | Uploads DOCX, PPTX, PDF, and image files. |
-| POST | `/api/edit` | Applies conversational editing instructions. |
-| POST | `/api/convert` | Converts between DOCX and PPTX formats. |
-| GET | `/api/artifacts` | Lists generated files and their download URLs. |
-| GET | `/api/download/<filename>` | Downloads generated DOCX or PPTX files. |
-| GET | `/api/traceability` | Returns citation and claim lineage information. |
-| GET | `/api/versions` | Returns version history and diff logs. |
-
-### Example Request Bodies
-
-**Chat generation — `POST /api/chat`**
-
-```json
-{
-  "prompt": "Create a proposal using the uploaded template."
-}
-```
-
-**Conversational editing — `POST /api/edit`**
-
-```json
-{
-  "instruction": "Add an executive summary."
-}
-```
-
-**Document conversion — `POST /api/convert`**
-
-```json
-{
-  "direction": "docx_to_pptx"
-}
-```
-
-Supported conversion directions:
-
-- `docx_to_pptx`
-- `pptx_to_docx`
-
----
-
-## 📋 Project Deliverables
-
-1. **Multi-agent chatbot POC:** CLI, REST API, and web dashboard.
-2. **Modular source code:** Organized into agents, core engines, API services, and supporting scripts.
-3. **Template analysis:** Extraction of typography, brand palettes, margins, layouts, and tone.
-4. **Web research and Enterprise RAG:** Research capabilities and vector-based knowledge retrieval.
-5. **Editable document generation:** Native OpenXML DOCX and 12-slide PPTX outputs.
-6. **Conversational editing:** Refinements for executive summaries, conciseness, competitive analysis, and updated information.
-7. **Citation traceability:** Provenance mapping, confidence ratings, and source references.
-8. **Sample templates and outputs:** Included in the project directories.
-9. **Technical documentation:** Architecture diagrams, usage instructions, and API specifications.
-10. **Requirements and Git repository:** Dependency specifications and repository initialization on the `main` branch.
-
----
-
-## 🧪 Testing
-
-The project includes an automated test suite:
-
-```bash
-python3 app.py --test
-```
-
-Test file:
-
-```text
-tests/test_all.py
-```
-
-The documented test suite contains 11 unit and integration tests.
-
----
-
-## 🔮 Future Enhancements
-
-Potential areas for further development include:
-
-- Integration with production-grade LLM APIs.
-- Improved semantic embeddings and retrieval quality.
-- Authentication and role-based access control.
-- Enhanced OCR and complex document-layout recognition.
-- More advanced template fidelity and formatting validation.
-- Expanded evaluation datasets and automated quality benchmarks.
-- Production deployment, monitoring, and observability.
-
----
-
-## 📄 License
-
-Add the applicable license information here before distributing the project publicly.
-
----
-
-**Enterprise Multi-Agent AI System — Document & PPT Generation POC**
-
-*Automating document intelligence, enterprise knowledge retrieval, and editable business content generation.*
+| `GET` | `/api/status` | Provider, knowledge-base, and version status |
+| `POST` | `/api/orchestrate` | Run the document and presentation generation pipeline |
+| `POST` | `/api/upload` | Upload and ingest a supported source file |
+| `POST` | `/api/convert` | Convert between DOCX and PPTX |
+| `POST` | `/api/workspace/open` | Open an existing DOCX or PPTX in the editor |
+| `POST` | `/api/workspace/chat` | Apply a conversational edit |
+| `POST` | `/api/workspace/undo` | Restore the previous workspace version |
+| `POST` | `/api/workspace/redo` | Reapply the next workspace version |
+| `GET` | `/api/workspace/download` | Download the active edited file |
+
+See [API Documentation](docs/API_DOCUMENTATION.md) for request examples and security notes.
+
+## Documentation
+
+- [Master Project Documentation](docs/MASTER_PROJECT_DOCUMENTATION.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [AI Agent Documentation](docs/AI_AGENT_DOCUMENTATION.md)
+- [API Documentation](docs/API_DOCUMENTATION.md)
+- [RAG Documentation](docs/RAG_DOCUMENTATION.md)
+- [Security Documentation](docs/SECURITY_DOCUMENTATION.md)
+- [Testing and Evaluation](docs/TESTING_AND_EVALUATION.md)
+- [Deployment and DevOps](docs/DEPLOYMENT_DOCUMENTATION.md)
+- [Current vs. Production Architecture](docs/CURRENT_VS_PRODUCTION.md)
+- [Project Status and Scorecard](docs/PROJECT_STATUS.md)
+- [Demo Script](docs/DEMO_SCRIPT.md)
+- [Interview Preparation](docs/INTERVIEW_PREPARATION.md)
+- [Documentation Audit](docs/DOCUMENTATION_AUDIT.md)
+
+## Security Notes
+
+- Local configuration belongs in `.env`; only the placeholder-based `.env.example` should be committed.
+- `keys.txt`, private-key files, uploads, generated outputs, local versions, and the SQLite knowledge store are ignored.
+- The server binds to `127.0.0.1` because the API does not implement authentication.
+- Uploaded Office and image files should be treated as untrusted input and restricted to local evaluation.
+
+## Current Limitations
+
+- There is no authentication, authorization, RBAC, or per-user isolation.
+- Files and workspace state are stored locally and are not encrypted by the application.
+- Uploaded content is selected by file extension and is not malware-scanned.
+- The Express process launches Python subprocesses, and the shared local state is not designed for horizontal scaling.
+- Orchestration follows a static sequence rather than a dynamic planner or agent graph.
+- Local RAG uses hashed n-gram vectors rather than learned semantic embeddings.
+- Live web research requires the optional Gemini provider and is unavailable in default Ollama mode.
+- Prompt injection and RAG-poisoning defenses are not production-grade.
+
+Keep the service bound to localhost and use only trusted files. Review [Security Documentation](docs/SECURITY_DOCUMENTATION.md) before deployment work.
+
+## Future Improvements
+
+- Replace per-request Python subprocesses with a persistent backend service and asynchronous job queue.
+- Add authentication, authorization, per-user isolation, and encrypted object storage.
+- Upgrade retrieval to hybrid keyword and semantic search backed by a production vector database.
+- Add dynamic workflow routing, retries, observability, and evaluation traces.
+- Strengthen upload validation, XML hardening, malware scanning, prompt-injection defenses, and RAG ingestion controls.
+- Add claim-level citation mapping and a representative offline evaluation dataset.
+- Package the stack for reproducible container-based deployment and CI/CD.
+
+## License
+
+No license file is currently included. Add an explicit license before distributing or accepting external contributions.
